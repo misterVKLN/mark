@@ -11,7 +11,6 @@ import "quill/dist/quill.snow.css"; // Ensure correct CSS import
 import "highlight.js/styles/vs2015.css"; // Import a Highlight.js theme
 
 import { cn } from "@/lib/strings";
-import { getWordCount } from "@/lib/utils";
 import hljs from "highlight.js";
 
 interface Props extends ComponentPropsWithoutRef<"section"> {

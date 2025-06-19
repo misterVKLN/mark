@@ -4,12 +4,11 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { Prisma, QuestionType, ResponseType } from "@prisma/client";
+import { Prisma, } from "@prisma/client";
 import { PrismaService } from "../../../prisma.service";
 import { LearnerLiveRecordingFeedback } from "../attempt/dto/assignment-attempt/types";
 import {
   Choice,
-  GenerateQuestionVariantDto,
   QuestionDto,
   ScoringDto,
   VideoPresentationConfig,
@@ -17,7 +16,6 @@ import {
 import { BaseQuestionResponseDto } from "./dto/base.question.response.dto";
 import { CreateUpdateQuestionRequestDto } from "./dto/create.update.question.request.dto";
 import { LlmFacadeService } from "src/api/llm/llm-facade.service";
-import { AssignmentTypeEnum } from "src/api/llm/features/question-generation/services/question-generation.service";
 
 @Injectable()
 export class QuestionService {

@@ -1,5 +1,5 @@
 /* eslint-disable unicorn/no-null */
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { QuestionDto } from "src/api/assignment/dto/update.questions.request.dto";
 import { CreateQuestionResponseAttemptRequestDto } from "src/api/assignment/attempt/dto/question-response/create.question.response.attempt.request.dto";
 import {
