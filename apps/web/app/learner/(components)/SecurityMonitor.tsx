@@ -13,32 +13,30 @@ const SecurityMonitor: React.FC<SecurityMonitorProps> = ({
   const [showWarning, setShowWarning] = useState(false);
   const [warningMessage, setWarningMessage] = useState("");
 
-  // Debug logging
-  if (process.env.NODE_ENV === "development") {
-    console.log("=== SecurityMonitor Debug ===");
-    console.log("questionControls:", questionControls);
-    console.log("- preventPrint:", questionControls?.preventPrint);
-  }
-
   useEffect(() => {
     if (!questionControls) {
-      if (process.env.NODE_ENV === "development") {
-        console.log("SecurityMonitor: No questionControls provided");
-      }
       return;
-    }
-
-    if (process.env.NODE_ENV === "development") {
-      console.log("SecurityMonitor: Setting up event listeners");
-      console.log("- preventPrint:", questionControls.preventPrint);
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
       const ctrlOrCmd = isMac ? e.metaKey : e.ctrlKey;
 
-      // Prevent Print (Ctrl/Cmd + P)
-      if (questionControls.preventPrint && ctrlOrCmd && e.key === "p") {
+      if (questionControls.disableCopy && ctrlOrCmd && e.key === "c") {
+        e.preventDefault();
+        e.stopPropagation();
+        showWarningToast("Copying is disabled for this assignment");
+        return false;
+      }
+
+      if (questionControls.disablePaste && ctrlOrCmd && e.key === "v") {
+        e.preventDefault();
+        e.stopPropagation();
+        showWarningToast("Pasting is disabled for this assignment");
+        return false;
+      }
+
+      if (questionControls.disablePrint && ctrlOrCmd && e.key === "p") {
         e.preventDefault();
         e.stopPropagation();
         showWarningToast("Printing is disabled for this assignment");
@@ -47,21 +45,52 @@ const SecurityMonitor: React.FC<SecurityMonitorProps> = ({
     };
 
     const handleBeforePrint = (e: Event) => {
-      if (questionControls.preventPrint) {
+      if (questionControls.disablePrint) {
         e.preventDefault();
         e.stopPropagation();
         showWarningToast("Printing is disabled for this assignment");
       }
     };
 
-    // Register event listeners
+    const handleContextMenu = (e: MouseEvent) => {
+      if (questionControls.disableRightClick) {
+        e.preventDefault();
+        e.stopPropagation();
+        showWarningToast("Right-click is disabled for this assignment");
+        return false;
+      }
+    };
+
+    const handleCopy = (e: ClipboardEvent) => {
+      if (questionControls.disableCopy) {
+        e.preventDefault();
+        e.stopPropagation();
+        showWarningToast("Copying is disabled for this assignment");
+        return false;
+      }
+    };
+
+    const handlePaste = (e: ClipboardEvent) => {
+      if (questionControls.disablePaste) {
+        e.preventDefault();
+        e.stopPropagation();
+        showWarningToast("Pasting is disabled for this assignment");
+        return false;
+      }
+    };
+
     document.addEventListener("keydown", handleKeyDown, true);
     window.addEventListener("beforeprint", handleBeforePrint);
+    document.addEventListener("contextmenu", handleContextMenu, true);
+    document.addEventListener("copy", handleCopy, true);
+    document.addEventListener("paste", handlePaste, true);
 
-    // Cleanup
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
       window.removeEventListener("beforeprint", handleBeforePrint);
+      document.removeEventListener("contextmenu", handleContextMenu, true);
+      document.removeEventListener("copy", handleCopy, true);
+      document.removeEventListener("paste", handlePaste, true);
     };
   }, [questionControls]);
 

@@ -526,7 +526,7 @@ const Question: FC<Props> = ({
         >
           <MarkdownViewer
             className="text-gray-800"
-            allowCopy={questionControls?.allowCopy ?? true}
+            allowCopy={!(questionControls?.disableCopy ?? false)}
           >
             {learnerResponse.toString()}
           </MarkdownViewer>
@@ -813,7 +813,7 @@ const Question: FC<Props> = ({
 
       <MarkdownViewer
         className="mb-2 sm:mb-4 pb-2 sm:pb-4 border-b text-gray-700"
-        allowCopy={questionControls?.allowCopy ?? true}
+        allowCopy={!(questionControls?.disableCopy ?? false)}
       >
         {questionText}
       </MarkdownViewer>

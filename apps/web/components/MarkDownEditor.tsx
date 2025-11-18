@@ -22,8 +22,6 @@ interface Props extends ComponentPropsWithoutRef<"section"> {
   maxWords?: number | null;
   maxCharacters?: number | null;
   allowCopy?: boolean;
-  allowPaste?: boolean;
-  allowRightClick?: boolean;
 }
 
 const MarkdownEditor: React.FC<Props> = ({
@@ -35,8 +33,6 @@ const MarkdownEditor: React.FC<Props> = ({
   maxCharacters,
   placeholder = "Write your question here...",
   allowCopy = true,
-  allowPaste = true,
-  allowRightClick = true,
 }) => {
   const quillRef = useRef<HTMLDivElement>(null);
   const [quillInstance, setQuillInstance] = useState<any>(null);
@@ -129,46 +125,6 @@ const MarkdownEditor: React.FC<Props> = ({
       }
     };
   }, [quillInstance]);
-
-  useEffect(() => {
-    if (!quillInstance) return;
-
-    const handlePaste = (event: ClipboardEvent) => {
-      if (allowPaste) return;
-
-      const active = document.activeElement;
-      if (!active) return;
-
-      if (
-        active === quillInstance.root ||
-        quillInstance.root.contains(active)
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    };
-
-    document.addEventListener("paste", handlePaste, true);
-
-    return () => {
-      document.removeEventListener("paste", handlePaste, true);
-    };
-  }, [quillInstance, allowPaste]);
-
-  useEffect(() => {
-    if (!quillInstance || allowRightClick) return;
-
-    const root = quillInstance.root;
-
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-    };
-
-    root.addEventListener("contextmenu", handleContextMenu);
-
-    return () => root.removeEventListener("contextmenu", handleContextMenu);
-  }, [quillInstance, allowRightClick]);
 
   useEffect(() => {
     if (quillInstance) {

@@ -221,6 +221,7 @@ export type AuthorAssignmentState = {
   correctAnswerVisibility: CorrectAnswerVisibility;
   updatedAt: number;
   numberOfQuestionsPerAttempt?: number;
+  questionControls?: QuestionControls;
 };
 export type AuthorFileUploads = {
   filename: string;
@@ -645,10 +646,10 @@ export interface AssignmentAttemptWithQuestions extends AssignmentAttempt {
 }
 
 export interface QuestionControls {
-  allowCopy?: boolean;
-  allowPaste?: boolean;
-  allowRightClick?: boolean;
-  preventPrint?: boolean;
+  disableCopy?: boolean;
+  disablePaste?: boolean;
+  disableRightClick?: boolean;
+  disablePrint?: boolean;
   [key: string]: boolean | undefined;
 }
 

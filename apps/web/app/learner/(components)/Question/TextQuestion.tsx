@@ -24,9 +24,7 @@ function TextQuestion(props: Props) {
       placeholder="Type your answer here"
       maxWords={maxWords}
       maxCharacters={maxCharacters}
-      allowCopy={questionControls?.allowCopy ?? true}
-      allowPaste={questionControls?.allowPaste ?? true}
-      allowRightClick={questionControls?.allowRightClick ?? true}
+      allowCopy={!(questionControls?.disableCopy ?? false)}
     />
   );
 }

@@ -17,10 +17,10 @@ import {
 } from "class-validator";
 
 export interface QuestionControls {
-  allowCopy?: boolean;
-  allowPaste?: boolean;
-  allowRightClick?: boolean;
-  preventPrint?: boolean;
+  disableCopy?: boolean;
+  disablePaste?: boolean;
+  disableRightClick?: boolean;
+  disablePrint?: boolean;
   [key: string]: boolean | undefined;
 }
 

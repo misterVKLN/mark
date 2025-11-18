@@ -14,64 +14,47 @@ const AssignmentQuestionControls: FC<Props> = () => {
   );
 
   const handleToggle = (
-    key: "allowCopy" | "allowPaste" | "allowRightClick" | "preventPrint",
+    key: "disableCopy" | "disablePaste" | "disableRightClick" | "disablePrint",
   ) => {
     const newValue = !questionControls?.[key];
     const newControls = {
       ...questionControls,
       [key]: newValue,
     };
-
-    if (process.env.NODE_ENV === "development") {
-      console.log(`=== Toggle ${key} ===`);
-      console.log(`Old value:`, questionControls?.[key]);
-      console.log(`New value:`, newValue);
-      console.log(`Full questionControls:`, newControls);
-    }
-
     setQuestionControls(newControls);
   };
 
   return (
     <SectionWithTitle
-      title="Question Controls"
-      description="Configure what actions learners can perform while taking the assignment"
+      title="Assignment Restrictions"
+      description="Configure restrictions to prevent unauthorized behaviors during the assignment"
       className="flex flex-col gap-y-4"
     >
       <div className="flex flex-col gap-y-3">
         <ControlToggle
-          label="Allow Copying"
-          description="Let learners copy question text and their answers"
-          checked={questionControls?.allowCopy ?? false}
-          onChange={() => handleToggle("allowCopy")}
+          label="Disable Copying"
+          description="Prevent learners from copying question text or answers. Enable this to discourage sharing or plagiarism."
+          checked={questionControls?.disableCopy ?? false}
+          onChange={() => handleToggle("disableCopy")}
         />
         <ControlToggle
-          label="Allow Pasting"
-          description="Let learners paste content into answer fields"
-          checked={questionControls?.allowPaste ?? false}
-          onChange={() => handleToggle("allowPaste")}
+          label="Disable Pasting"
+          description="Prevent learners from pasting content into answer fields. Enable this to ensure original work or test typing skills."
+          checked={questionControls?.disablePaste ?? false}
+          onChange={() => handleToggle("disablePaste")}
         />
         <ControlToggle
-          label="Allow Right Click"
-          description="Let learners access the context menu with right click"
-          checked={questionControls?.allowRightClick ?? false}
-          onChange={() => handleToggle("allowRightClick")}
+          label="Disable Right Click"
+          description="Prevent learners from accessing the right-click context menu. Enable this to reduce copying or accessing browser features."
+          checked={questionControls?.disableRightClick ?? false}
+          onChange={() => handleToggle("disableRightClick")}
         />
-      </div>
-
-      <div className="mt-2 pt-4 border-t border-gray-200">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">
-          Security Controls
-        </h3>
-        <div className="flex flex-col gap-y-3">
-          <ControlToggle
-            label="Prevent Printing"
-            description="Block print attempts (Ctrl/Cmd+P) during the assignment. Users can still screenshot, but they cannot download the assignment by printing it."
-            checked={questionControls?.preventPrint ?? false}
-            onChange={() => handleToggle("preventPrint")}
-            variant="prevent"
-          />
-        </div>
+        <ControlToggle
+          label="Disable Printing"
+          description="Block print attempts (Ctrl/Cmd+P) during the assignment. Enable this to prevent downloading or distributing the assignment."
+          checked={questionControls?.disablePrint ?? false}
+          onChange={() => handleToggle("disablePrint")}
+        />
       </div>
     </SectionWithTitle>
   );
@@ -82,7 +65,6 @@ interface ControlToggleProps {
   description: string;
   checked: boolean;
   onChange: () => void;
-  variant?: "allow" | "prevent";
 }
 
 const ControlToggle: FC<ControlToggleProps> = ({
@@ -90,19 +72,9 @@ const ControlToggle: FC<ControlToggleProps> = ({
   description,
   checked,
   onChange,
-  variant = "allow",
 }) => {
-  const bgColor =
-    variant === "prevent"
-      ? checked
-        ? "bg-orange-600"
-        : "bg-gray-200"
-      : checked
-        ? "bg-violet-600"
-        : "bg-gray-200";
-
-  const ringColor =
-    variant === "prevent" ? "focus:ring-orange-600" : "focus:ring-violet-600";
+  const bgColor = checked ? "bg-orange-600" : "bg-gray-200";
+  const ringColor = "focus:ring-orange-600";
 
   return (
     <div className="flex items-start justify-between p-4 border border-gray-200 rounded-md hover:border-gray-300 transition-colors">

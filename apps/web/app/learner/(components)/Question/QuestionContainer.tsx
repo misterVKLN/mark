@@ -282,7 +282,7 @@ function Component(props: Props) {
             <MarkdownViewer
               className="text-gray-800 px-2 border-gray-300 text-sm sm:text-base"
               id={`question-${question.id}-original`}
-              allowCopy={questionControls?.allowCopy ?? true}
+              allowCopy={!(questionControls?.disableCopy ?? false)}
             >
               {question.translations?.[userPreferedLanguage]?.translatedText ??
                 question.question}
