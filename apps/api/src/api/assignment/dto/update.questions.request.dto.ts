@@ -205,14 +205,13 @@ export class QuestionDto {
   isDeleted?: boolean;
 
   @ApiPropertyOptional({
-  description: "Author comment or note on this question",
-  type: String,
-  nullable: true,
+    description: "Author comment or note on this question",
+    type: String,
+    nullable: true,
   })
   @IsOptional()
   @IsString()
   authorComment?: string | null;
-
 
   @ApiProperty({
     description: "Grading context question IDs (array of question IDs)",
@@ -780,9 +779,9 @@ export class AttemptQuestionDto {
   choices?: Choice[];
 
   @ApiPropertyOptional({
-  description: "Author comment or note on this question",
-  type: String,
-  nullable: true,
+    description: "Author comment or note on this question",
+    type: String,
+    nullable: true,
   })
   @IsOptional()
   @IsString()

@@ -80,9 +80,9 @@ export class CreateUpdateQuestionRequestDto {
   type: QuestionType;
 
   @ApiPropertyOptional({
-  description: "Author comment or note on this question",
-  type: String,
-  nullable: true,
+    description: "Author comment or note on this question",
+    type: String,
+    nullable: true,
   })
   @IsOptional()
   @IsString()
