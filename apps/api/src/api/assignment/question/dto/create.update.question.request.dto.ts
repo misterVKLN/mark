@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { QuestionType } from "@prisma/client";
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import {
   ArrayNotEmpty,
   IsArray,
@@ -45,6 +45,9 @@ export interface LLMResponseQuestion {
 export class Choice {
   @IsNotEmpty()
   @IsString()
+  @Transform(({ value }) =>
+    typeof value === "number" ? String(value) : (value as string),
+  )
   choice: string;
   @IsNotEmpty()
   @IsBoolean()

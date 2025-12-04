@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
   AssignmentQuestionDisplayOrder,
@@ -6,7 +7,7 @@ import {
   QuestionType,
   ResponseType,
 } from "@prisma/client";
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import {
   ArrayNotEmpty,
   IsArray,
@@ -31,6 +32,9 @@ export enum VariantType {
 export class Choice {
   @IsNotEmpty()
   @IsString()
+  @Transform(({ value }) =>
+    typeof value === "number" ? String(value) : (value as string),
+  )
   choice: string;
 
   @IsNotEmpty()
