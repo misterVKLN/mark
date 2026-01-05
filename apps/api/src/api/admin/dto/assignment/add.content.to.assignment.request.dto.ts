@@ -1,12 +1,13 @@
 import { ApiProperty } from "@nestjs/swagger";
 import {
+  AssignmentQuestionDisplayOrder,
   AssignmentType,
   CorrectAnswerVisibility,
-  AssignmentQuestionDisplayOrder,
   QuestionDisplay,
   QuestionType,
   ResponseType,
 } from "@prisma/client";
+import { Type } from "class-transformer";
 import {
   IsArray,
   IsBoolean,
@@ -20,7 +21,6 @@ import {
   IsString,
   ValidateNested,
 } from "class-validator";
-import { Type } from "class-transformer";
 
 class ChoiceDto {
   @ApiProperty()
@@ -153,10 +153,6 @@ class AssignmentDetailsDto {
   @ApiProperty()
   @IsString()
   instructions: string;
-
-  @ApiProperty()
-  @IsString()
-  learningObjectives: string;
 }
 
 class AssignmentConfigDto {

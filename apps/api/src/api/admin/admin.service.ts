@@ -2060,6 +2060,74 @@ export class AdminService {
   }
 
   /**
+   * Determines the next semantic version number for an assignment.
+   * Defaults to 0.0.1 when no versions exist; otherwise bumps the patch of the highest semver-like version.
+   */
+  private getNextVersionNumber(existingVersionNumbers: string[]): string {
+    if (!existingVersionNumbers || existingVersionNumbers.length === 0) {
+      return "0.0.1";
+    }
+
+    const semverRegex = /^(\d+)\.(\d+)\.(\d+)(-rc\d+)?$/;
+    const parsed = existingVersionNumbers
+      .map((v) => {
+        const match = semverRegex.exec(v);
+        if (!match) return null;
+        const [, major, minor, patch, rc] = match;
+        return {
+          major: Number.parseInt(major, 10),
+          minor: Number.parseInt(minor, 10),
+          patch: Number.parseInt(patch, 10),
+          isRc: Boolean(rc),
+        };
+      })
+      .filter(Boolean) as {
+      major: number;
+      minor: number;
+      patch: number;
+      isRc: boolean;
+    }[];
+
+    if (parsed.length === 0) {
+      return "0.0.1";
+    }
+
+    let highest = parsed[0];
+    for (let index = 1; index < parsed.length; index += 1) {
+      const current = parsed[index];
+      if (current.major !== highest.major) {
+        highest = current.major > highest.major ? current : highest;
+        continue;
+      }
+      if (current.minor !== highest.minor) {
+        highest = current.minor > highest.minor ? current : highest;
+        continue;
+      }
+      if (current.patch !== highest.patch) {
+        highest = current.patch > highest.patch ? current : highest;
+        continue;
+      }
+      if (current.isRc === highest.isRc) {
+        continue;
+      }
+      // Non-RC is considered newer than RC for the same patch
+      if (!current.isRc && highest.isRc) {
+        highest = current;
+      }
+    }
+
+    const existingSet = new Set(existingVersionNumbers);
+    let nextPatch = highest.patch + 1;
+    let candidate = `${highest.major}.${highest.minor}.${nextPatch}`;
+    while (existingSet.has(candidate)) {
+      nextPatch += 1;
+      candidate = `${highest.major}.${highest.minor}.${nextPatch}`;
+    }
+
+    return candidate;
+  }
+
+  /**
    * Add content (details, configuration, and questions) to an existing empty assignment.
    * Uses a transaction to ensure atomicity - if any step fails, all changes are rolled back.
    *
@@ -2075,6 +2143,8 @@ export class AdminService {
   ): Promise<BaseAssignmentResponseDto> {
     const { assignment, config, gradingCriteria, questions } =
       addContentRequestDto;
+    // Strip fields that don't exist in the assignment table (e.g., learningObjectives)
+    const { ...assignmentDetails } = assignment;
 
     const result = await this.prisma.$transaction(async (tx) => {
       const existingAssignment = await tx.assignment.findUnique({
@@ -2096,10 +2166,18 @@ export class AdminService {
         );
       }
 
+      const existingVersionNumbers = await tx.assignmentVersion.findMany({
+        where: { assignmentId: id },
+        select: { versionNumber: true },
+      });
+      const versionNumber = this.getNextVersionNumber(
+        existingVersionNumbers.map((v) => v.versionNumber),
+      );
+
       const updatedAssignment = await tx.assignment.update({
         where: { id },
         data: {
-          ...assignment,
+          ...assignmentDetails,
           gradingCriteriaOverview: gradingCriteria,
           published: true,
           numAttempts: config.numAttempts,
@@ -2147,10 +2225,10 @@ export class AdminService {
       const assignmentVersion = await tx.assignmentVersion.create({
         data: {
           assignmentId: id,
-          versionNumber: "0.0.1",
-          name: assignment.name,
-          introduction: assignment.introduction,
-          instructions: assignment.instructions,
+          versionNumber,
+          name: assignmentDetails.name,
+          introduction: assignmentDetails.introduction,
+          instructions: assignmentDetails.instructions,
           gradingCriteriaOverview: gradingCriteria,
           type: existingAssignment.type,
           timeEstimateMinutes: config.timeEstimateMinutes,
@@ -2216,7 +2294,7 @@ export class AdminService {
       });
 
       this.logger.log(
-        `Successfully created version 0.0.1 for assignment ${id}`,
+        `Successfully created version ${versionNumber} for assignment ${id}`,
       );
 
       return updatedAssignment;

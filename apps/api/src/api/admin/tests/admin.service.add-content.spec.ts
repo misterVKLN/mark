@@ -36,7 +36,6 @@ describe("AdminService - addContentToAssignment", () => {
       introduction:
         "<p>In this project, you will explore a Cybersecurity job listing.</p>",
       instructions: "<p>Complete the following tasks:</p>",
-      learningObjectives: "Understanding cybersecurity careers",
     },
     config: {
       numAttempts: -1,
@@ -146,6 +145,7 @@ describe("AdminService - addContentToAssignment", () => {
               findMany: jest.fn(),
             },
             assignmentVersion: {
+              findMany: jest.fn(),
               create: jest.fn(),
             },
             questionVersion: {
@@ -245,6 +245,7 @@ describe("AdminService - addContentToAssignment", () => {
               findMany: jest.fn().mockResolvedValue(mockCreatedQuestions),
             },
             assignmentVersion: {
+              findMany: jest.fn().mockResolvedValue([]),
               create: jest.fn().mockResolvedValue(mockAssignmentVersion),
             },
             questionVersion: {
@@ -315,6 +316,7 @@ describe("AdminService - addContentToAssignment", () => {
               findMany: jest.fn().mockResolvedValue([]),
             },
             assignmentVersion: {
+              findMany: jest.fn().mockResolvedValue([]),
               create: jest.fn().mockImplementation((args) => {
                 capturedVersionData = args.data;
                 return Promise.resolve(mockAssignmentVersion);
@@ -380,6 +382,7 @@ describe("AdminService - addContentToAssignment", () => {
               findMany: jest.fn().mockResolvedValue(mockCreatedQuestions),
             },
             assignmentVersion: {
+              findMany: jest.fn().mockResolvedValue([]),
               create: jest
                 .fn()
                 .mockResolvedValue({ id: 1, versionNumber: "0.0.1" }),
@@ -442,6 +445,7 @@ describe("AdminService - addContentToAssignment", () => {
               findMany: jest.fn().mockResolvedValue([]),
             },
             assignmentVersion: {
+              findMany: jest.fn().mockResolvedValue([]),
               create: jest
                 .fn()
                 .mockResolvedValue({ id: 99, versionNumber: "0.0.1" }),
@@ -492,6 +496,7 @@ describe("AdminService - addContentToAssignment", () => {
               findMany: jest.fn().mockResolvedValue([]),
             },
             assignmentVersion: {
+              findMany: jest.fn().mockResolvedValue([]),
               create: jest
                 .fn()
                 .mockResolvedValue({ id: 1, versionNumber: "0.0.1" }),
@@ -577,6 +582,9 @@ describe("AdminService - addContentToAssignment", () => {
                 .fn()
                 .mockRejectedValue(new Error("Question creation failed")),
             },
+            assignmentVersion: {
+              findMany: jest.fn().mockResolvedValue([]),
+            },
           };
 
           return await callback(tx);
@@ -612,6 +620,7 @@ describe("AdminService - addContentToAssignment", () => {
               findMany: jest.fn().mockResolvedValue([{ id: 1 }, { id: 2 }]),
             },
             assignmentVersion: {
+              findMany: jest.fn().mockResolvedValue([]),
               create: jest
                 .fn()
                 .mockResolvedValue({ id: 1, versionNumber: "0.0.1" }),
@@ -665,6 +674,7 @@ describe("AdminService - addContentToAssignment", () => {
               findMany: jest.fn().mockResolvedValue([]),
             },
             assignmentVersion: {
+              findMany: jest.fn().mockResolvedValue([]),
               create: jest
                 .fn()
                 .mockResolvedValue({ id: 1, versionNumber: "0.0.1" }),
@@ -713,6 +723,7 @@ describe("AdminService - addContentToAssignment", () => {
               findMany: jest.fn().mockResolvedValue([]),
             },
             assignmentVersion: {
+              findMany: jest.fn().mockResolvedValue([]),
               create: jest.fn().mockImplementation((args) => {
                 capturedUserId = args.data.createdBy;
                 return Promise.resolve({ id: 1, versionNumber: "0.0.1" });
@@ -778,6 +789,7 @@ describe("AdminService - addContentToAssignment", () => {
               ]),
             },
             assignmentVersion: {
+              findMany: jest.fn().mockResolvedValue([]),
               create: jest
                 .fn()
                 .mockResolvedValue({ id: 1, versionNumber: "0.0.1" }),
@@ -838,6 +850,7 @@ describe("AdminService - addContentToAssignment", () => {
               findMany: jest.fn().mockResolvedValue(mockCreatedQuestions),
             },
             assignmentVersion: {
+              findMany: jest.fn().mockResolvedValue([]),
               create: jest
                 .fn()
                 .mockResolvedValue({ id: 1, versionNumber: "0.0.1" }),
