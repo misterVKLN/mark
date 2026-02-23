@@ -241,7 +241,11 @@ export class FileGradingService implements IFileGradingService {
       );
     }
 
-    if (hasStructuredContent) {
+    if (
+      hasEvidenceEligibleContent &&
+      hasRubrics &&
+      scoringCriteriaType === "CRITERIA_BASED"
+    ) {
       this.logger.info("Using evidence-based grading with structured content");
       const model = await this.gradeWithEvidenceBasedApproach(
         enrichedLearnerResponse,
