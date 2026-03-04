@@ -1250,6 +1250,115 @@ export class TranslationMaintenanceController {
   }
 
   // ---------------------------------------------------------------------------
+  // Question-version → base-question mapping
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Resolves question-version records to base Question IDs using three
+   * strategies (in priority order):
+   *
+   *   1. Direct `questionId` FK on the QuestionVersion.
+   *   2. Display-order alignment with `assignment.questionOrder`.
+   *   3. Normalized text matching (only when there is exactly one match).
+   *
+   * When none of the question versions can be mapped but base questions exist,
+   * falls back to returning ALL base question IDs (mirrors the fallback in
+   * translateAssignmentQuestions).
+   *
+   * Both `scanAssignment` and `translateAssignmentQuestions` must agree on
+   * which questions belong to a version; this shared helper guarantees parity.
+   */
+  private async resolveActiveVersionQuestionIds(
+    assignmentId: number,
+    questionVersions: Array<{
+      questionId: number | null;
+      displayOrder: number | null;
+      question: string | null;
+    }>,
+    questionOrder: unknown,
+  ): Promise<number[]> {
+    if (questionVersions.length === 0) {
+      return [];
+    }
+
+    const baseQuestions = await this.prisma.question.findMany({
+      where: { assignmentId, isDeleted: false },
+      select: { id: true, question: true },
+    });
+
+    if (baseQuestions.length === 0) {
+      return [];
+    }
+
+    const baseQuestionById = new Map(baseQuestions.map((q) => [q.id, q]));
+
+    // Display-order → base question ID map from assignment.questionOrder
+    const baseQuestionIdByDisplayOrder = new Map<number, number>();
+    if (Array.isArray(questionOrder)) {
+      for (const [index, qId] of questionOrder.entries()) {
+        if (typeof qId === "number") {
+          baseQuestionIdByDisplayOrder.set(index + 1, qId);
+        }
+      }
+    }
+
+    // Normalized text → base questions map
+    const baseQuestionsByText = new Map<
+      string,
+      Array<(typeof baseQuestions)[number]>
+    >();
+    for (const question of baseQuestions) {
+      const normalizedText = normalizeQuestionText(question.question);
+      if (normalizedText) {
+        const byText = baseQuestionsByText.get(normalizedText) ?? [];
+        byText.push(question);
+        baseQuestionsByText.set(normalizedText, byText);
+      }
+    }
+
+    const resolvedIds = new Set<number>();
+
+    for (const qv of questionVersions) {
+      let baseQuestion: (typeof baseQuestions)[number] | undefined;
+
+      // Strategy 1: direct FK
+      if (qv.questionId !== null && qv.questionId !== undefined) {
+        baseQuestion = baseQuestionById.get(qv.questionId);
+      }
+
+      // Strategy 2: display-order alignment
+      if (!baseQuestion && typeof qv.displayOrder === "number") {
+        const byDisplayId = baseQuestionIdByDisplayOrder.get(qv.displayOrder);
+        if (typeof byDisplayId === "number") {
+          baseQuestion = baseQuestionById.get(byDisplayId);
+        }
+      }
+
+      // Strategy 3: normalized text match (only unambiguous)
+      if (!baseQuestion) {
+        const normalizedVersionText = normalizeQuestionText(qv.question);
+        const byText = normalizedVersionText
+          ? baseQuestionsByText.get(normalizedVersionText)
+          : undefined;
+        if (byText?.length === 1) {
+          baseQuestion = byText[0];
+        }
+      }
+
+      if (baseQuestion) {
+        resolvedIds.add(baseQuestion.id);
+      }
+    }
+
+    // Fallback: if no versions could be mapped, use all base questions
+    if (resolvedIds.size === 0) {
+      return baseQuestions.map((q) => q.id);
+    }
+
+    return [...resolvedIds];
+  }
+
+  // ---------------------------------------------------------------------------
   // Find-missing helpers
   // ---------------------------------------------------------------------------
 
@@ -1293,11 +1402,16 @@ export class TranslationMaintenanceController {
       select: {
         id: true,
         name: true,
+        questionOrder: true,
         currentVersion: {
           select: {
             id: true,
             questionVersions: {
-              select: { questionId: true },
+              select: {
+                questionId: true,
+                displayOrder: true,
+                question: true,
+              },
             },
           },
         },
@@ -1319,19 +1433,17 @@ export class TranslationMaintenanceController {
       (lang) => !assignmentLangs.has(normalizeLang(lang)),
     );
 
+    const questionVersions = assignment.currentVersion?.questionVersions ?? [];
+    const shouldRestrictToCurrentVersion =
+      !includeAll && questionVersions.length > 0;
+
     const currentVersionQuestionIds = includeAll
       ? []
-      : [
-          ...new Set(
-            (assignment.currentVersion?.questionVersions ?? [])
-              .map((qv) => qv.questionId)
-              .filter((id): id is number => id !== null && id !== undefined),
-          ),
-        ];
-
-    const shouldRestrictToCurrentVersion =
-      !includeAll &&
-      (assignment.currentVersion?.questionVersions?.length ?? 0) > 0;
+      : await this.resolveActiveVersionQuestionIds(
+          assignmentId,
+          questionVersions,
+          assignment.questionOrder,
+        );
 
     const questions = await this.prisma.question.findMany({
       where: {
