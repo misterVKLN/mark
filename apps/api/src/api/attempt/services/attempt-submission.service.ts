@@ -5,6 +5,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from "@nestjs/common";
 import {
   AssignmentAttempt,
@@ -924,6 +925,39 @@ export class AttemptSubmissionService {
         },
       });
 
+      if (assignment?.requireAllQuestions) {
+        const optionalQuestionIds = new Set(
+          assignment.optionalQuestionIds ?? [],
+        );
+        let questionOrder = assignmentAttempt.questionOrder;
+        if (!questionOrder || questionOrder.length === 0) {
+          questionOrder =
+            assignment.questionOrder?.length > 0
+              ? assignment.questionOrder
+              : (assignment.questions?.map((question) => question.id) ?? []);
+        }
+        const requiredQuestionIds = questionOrder.filter(
+          (questionId) => !optionalQuestionIds.has(questionId),
+        );
+        const responseMap = new Map(
+          updateDto.responsesForQuestions.map((response) => [
+            response.id,
+            response,
+          ]),
+        );
+        const unansweredQuestionIds = requiredQuestionIds.filter(
+          (questionId) => !this.hasLearnerResponse(responseMap.get(questionId)),
+        );
+
+        if (unansweredQuestionIds.length > 0) {
+          throw new UnprocessableEntityException(
+            `All required questions must be answered before submitting (${unansweredQuestionIds.length} unanswered).`,
+          );
+        }
+      }
+
+      // Questions are graded from 0-90% by GradingProgressService
+      // Reserve 91-100% for finalization steps
       const successfulQuestionResponses =
         await this.questionResponseService.submitQuestions(
           updateDto.responsesForQuestions,
@@ -1233,6 +1267,51 @@ export class AttemptSubmissionService {
       },
       where: { id: attemptId },
     });
+  }
+
+  private hasPresentationResponse(
+    response?: {
+      transcript?: string | null;
+      slidesData?: unknown[] | null;
+    } | null,
+  ): boolean {
+    if (!response) {
+      return false;
+    }
+    const transcript = response.transcript?.trim() ?? "";
+    if (transcript.length > 0) {
+      return true;
+    }
+    return (response.slidesData?.length ?? 0) > 0;
+  }
+
+  private hasLearnerResponse(
+    response?: LearnerUpdateAssignmentAttemptRequestDto["responsesForQuestions"][number],
+  ): boolean {
+    if (!response) {
+      return false;
+    }
+    const text = response.learnerTextResponse?.trim() ?? "";
+    const hasText =
+      text.length > 0 && response.learnerTextResponse !== "<p><br></p>";
+    const hasUrl = Boolean(response.learnerUrlResponse?.trim());
+    const hasChoices = (response.learnerChoices?.length ?? 0) > 0;
+    const hasAnswerChoice =
+      response.learnerAnswerChoice !== null &&
+      response.learnerAnswerChoice !== undefined;
+    const hasFiles = (response.learnerFileResponse?.length ?? 0) > 0;
+    const hasPresentation = this.hasPresentationResponse(
+      response.learnerPresentationResponse,
+    );
+
+    return (
+      hasText ||
+      hasUrl ||
+      hasChoices ||
+      hasAnswerChoice ||
+      hasFiles ||
+      hasPresentation
+    );
   }
 
   private async pruneAutoSavedResponses(

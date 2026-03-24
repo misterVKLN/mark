@@ -1961,6 +1961,14 @@ export const useAuthorStore = createWithEqualityFn<
               versionData.questionDisplay !== undefined
                 ? versionData.questionDisplay
                 : assignmentConfigState.questionDisplay,
+            requireAllQuestions:
+              versionData.requireAllQuestions !== undefined
+                ? versionData.requireAllQuestions
+                : assignmentConfigState.requireAllQuestions,
+            optionalQuestionIds:
+              versionData.optionalQuestionIds !== undefined
+                ? versionData.optionalQuestionIds
+                : assignmentConfigState.optionalQuestionIds,
           });
 
           useAssignmentFeedbackConfig
@@ -2183,6 +2191,8 @@ export const useAuthorStore = createWithEqualityFn<
                   showQuestions: feedbackData.showQuestions,
                   showQuestionScore: feedbackData.showQuestionScore,
                   showAssignmentScore: feedbackData.showAssignmentScore,
+                  requireAllQuestions: configData.requireAllQuestions,
+                  optionalQuestionIds: configData.optionalQuestionIds,
                   numberOfQuestionsPerAttempt:
                     configData.numberOfQuestionsPerAttempt,
                 },
@@ -2313,6 +2323,8 @@ export const useAuthorStore = createWithEqualityFn<
                 showQuestionScore: feedbackConfig.showQuestionScore,
                 showSubmissionFeedback: feedbackConfig.showSubmissionFeedback,
                 showQuestions: feedbackConfig.showQuestions,
+                requireAllQuestions: assignmentConfig.requireAllQuestions,
+                optionalQuestionIds: assignmentConfig.optionalQuestionIds,
 
                 published: false,
               },
@@ -2505,6 +2517,14 @@ export const useAuthorStore = createWithEqualityFn<
                         assignment.showSubmissionFeedback !== undefined
                           ? assignment.showSubmissionFeedback
                           : assignmentConfigStore.showSubmissionFeedback,
+                      requireAllQuestions:
+                        assignment.requireAllQuestions !== undefined
+                          ? assignment.requireAllQuestions
+                          : assignmentConfigStore.requireAllQuestions,
+                      optionalQuestionIds:
+                        assignment.optionalQuestionIds !== undefined
+                          ? assignment.optionalQuestionIds
+                          : assignmentConfigStore.optionalQuestionIds,
                     });
                   }
 
