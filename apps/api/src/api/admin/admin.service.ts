@@ -1318,7 +1318,10 @@ export class AdminService {
                   : {}),
                 ...(filters?.userId
                   ? {
-                      userId: { contains: filters.userId, mode: "insensitive" },
+                      userId: {
+                        equals: filters.userId,
+                        mode: "insensitive" as const,
+                      },
                     }
                   : {}),
               },
@@ -1338,8 +1341,8 @@ export class AdminService {
                   ...(filters?.userId
                     ? {
                         userId: {
-                          contains: filters.userId,
-                          mode: "insensitive",
+                          equals: filters.userId,
+                          mode: "insensitive" as const,
                         },
                       }
                     : {}),
@@ -1363,7 +1366,12 @@ export class AdminService {
                 ? { createdAt: dateFilter }
                 : {}),
               ...(filters?.userId
-                ? { userId: { contains: filters.userId, mode: "insensitive" } }
+                ? {
+                    userId: {
+                      equals: filters.userId,
+                      mode: "insensitive" as const,
+                    },
+                  }
                 : {}),
             },
           })
@@ -1379,7 +1387,10 @@ export class AdminService {
                   : {}),
                 ...(filters?.userId
                   ? {
-                      userId: { contains: filters.userId, mode: "insensitive" },
+                      userId: {
+                        equals: filters.userId,
+                        mode: "insensitive" as const,
+                      },
                     }
                   : {}),
               },
@@ -1394,8 +1405,8 @@ export class AdminService {
                   ...(filters?.userId
                     ? {
                         userId: {
-                          contains: filters.userId,
-                          mode: "insensitive",
+                          equals: filters.userId,
+                          mode: "insensitive" as const,
                         },
                       }
                     : {}),
@@ -1416,7 +1427,12 @@ export class AdminService {
                 ? { createdAt: dateFilter }
                 : {}),
               ...(filters?.userId
-                ? { userId: { contains: filters.userId, mode: "insensitive" } }
+                ? {
+                    userId: {
+                      equals: filters.userId,
+                      mode: "insensitive" as const,
+                    },
+                  }
                 : {}),
             },
             take: 10,
@@ -1446,7 +1462,10 @@ export class AdminService {
                   : {}),
                 ...(filters?.userId
                   ? {
-                      userId: { contains: filters.userId, mode: "insensitive" },
+                      userId: {
+                        equals: filters.userId,
+                        mode: "insensitive" as const,
+                      },
                     }
                   : {}),
               },
@@ -1494,7 +1513,12 @@ export class AdminService {
                 ? { createdAt: dateFilter }
                 : {}),
               ...(filters?.userId
-                ? { userId: { contains: filters.userId, mode: "insensitive" } }
+                ? {
+                    userId: {
+                      equals: filters.userId,
+                      mode: "insensitive" as const,
+                    },
+                  }
                 : {}),
             },
             _avg: { assignmentRating: true },
