@@ -3309,7 +3309,13 @@ export class FileContentExtractionService {
       allText += `Total Slides: ${slides.size}\n`;
       allText += `Slides with Notes: ${notes.size}\n\n`;
 
-      const maxSlide = Math.max(...slides.keys(), ...notes.keys());
+      let maxSlide = 0;
+      for (const k of slides.keys()) {
+        if (k > maxSlide) maxSlide = k;
+      }
+      for (const k of notes.keys()) {
+        if (k > maxSlide) maxSlide = k;
+      }
 
       for (let i = 1; i <= maxSlide; i++) {
         if (slides.has(i)) {
