@@ -93,6 +93,10 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
   private heartbeatInterval?: NodeJS.Timeout;
   private readonly workerInstanceId = randomUUID();
   private readonly startedAt = new Date().toISOString();
+  // Per-queue concurrency this pod actually configured its workers with,
+  // captured from the createWorker calls so the heartbeat reports the live
+  // values rather than a separate copy that could drift.
+  private concurrencyByQueue: Record<string, number> = {};
 
   constructor(
     private readonly jobExecutorService: JobExecutorService,
@@ -164,11 +168,38 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     const ATTEMPT_LOCK_DURATION_MS = 600_000;
     const ATTEMPT_NO_STALL_RECOVERY = 0;
 
+    // Per-queue concurrency values, computed once so the createWorker calls
+    // and the heartbeat report the same numbers (no drift).
+    const ASSIGNMENT_V1_CONCURRENCY = 2;
+    const ASSIGNMENT_V2_CONCURRENCY = 2;
+    const TRANSLATION_CONCURRENCY = Number.parseInt(
+      process.env.TRANSLATION_CONCURRENCY ?? "8",
+      10,
+    );
+    // Number of grading JOBS the worker pulls from BullMQ concurrently.
+    // Distinct from GRADING_CONCURRENCY (apps/api), which caps how many
+    // LLM CALLS run in parallel inside one grading job. The two values
+    // were sharing a name and produced a footgun where setting one
+    // accidentally tuned the other; renamed to make the layer explicit.
+    const GRADING_WORKER_CONCURRENCY = Number.parseInt(
+      process.env.GRADING_WORKER_CONCURRENCY ?? "4",
+      10,
+    );
+    const ADMIN_TRANSLATION_CONCURRENCY = 1;
+
+    this.concurrencyByQueue = {
+      [JOB_QUEUE_NAMES.ASSIGNMENT_V1]: ASSIGNMENT_V1_CONCURRENCY,
+      [JOB_QUEUE_NAMES.ASSIGNMENT_V2]: ASSIGNMENT_V2_CONCURRENCY,
+      [JOB_QUEUE_NAMES.ASSIGNMENT_V2_TRANSLATIONS]: TRANSLATION_CONCURRENCY,
+      [JOB_QUEUE_NAMES.ATTEMPT]: GRADING_WORKER_CONCURRENCY,
+      [JOB_QUEUE_NAMES.ADMIN_TRANSLATION]: ADMIN_TRANSLATION_CONCURRENCY,
+    };
+
     this.workers.push(
       this.createWorker(
         JOB_QUEUE_NAMES.ASSIGNMENT_V1,
         async (job) => this.handleAssignmentV1Job(job),
-        2,
+        ASSIGNMENT_V1_CONCURRENCY,
         {
           lockDuration: ASSIGNMENT_PUBLISH_LOCK_DURATION_MS,
           maxStalledCount: ASSIGNMENT_NO_STALL_RECOVERY,
@@ -177,7 +208,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       this.createWorker(
         JOB_QUEUE_NAMES.ASSIGNMENT_V2,
         async (job) => this.handleAssignmentV2Job(job),
-        2,
+        ASSIGNMENT_V2_CONCURRENCY,
         {
           lockDuration: ASSIGNMENT_PUBLISH_LOCK_DURATION_MS,
           maxStalledCount: ASSIGNMENT_NO_STALL_RECOVERY,
@@ -186,7 +217,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       this.createWorker(
         JOB_QUEUE_NAMES.ASSIGNMENT_V2_TRANSLATIONS,
         async (job) => this.handleTranslationJob(job),
-        Number.parseInt(process.env.TRANSLATION_CONCURRENCY ?? "8", 10),
+        TRANSLATION_CONCURRENCY,
         {
           lockDuration: TRANSLATION_LOCK_DURATION_MS,
           maxStalledCount: TRANSLATION_NO_STALL_RECOVERY,
@@ -195,12 +226,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       this.createWorker(
         JOB_QUEUE_NAMES.ATTEMPT,
         async (job) => this.handleAttemptJob(job),
-        // Number of grading JOBS the worker pulls from BullMQ concurrently.
-        // Distinct from GRADING_CONCURRENCY (apps/api), which caps how many
-        // LLM CALLS run in parallel inside one grading job. The two values
-        // were sharing a name and produced a footgun where setting one
-        // accidentally tuned the other; renamed to make the layer explicit.
-        Number.parseInt(process.env.GRADING_WORKER_CONCURRENCY ?? "4", 10),
+        GRADING_WORKER_CONCURRENCY,
         {
           lockDuration: ATTEMPT_LOCK_DURATION_MS,
           maxStalledCount: ATTEMPT_NO_STALL_RECOVERY,
@@ -209,7 +235,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
       this.createWorker(
         JOB_QUEUE_NAMES.ADMIN_TRANSLATION,
         async (job) => this.handleAdminTranslationJob(job),
-        1,
+        ADMIN_TRANSLATION_CONCURRENCY,
       ),
     );
 
@@ -317,6 +343,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
         updatedAt: new Date().toISOString(),
         workerCount: this.workers.length,
         queues: Object.values(JOB_QUEUE_NAMES),
+        concurrencyByQueue: this.concurrencyByQueue,
       }),
       "EX",
       this.getHeartbeatTtlSeconds(),

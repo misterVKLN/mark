@@ -12,6 +12,19 @@ jest.mock("@/lib/shared", () => ({
     .fn()
     .mockResolvedValue({ generatedAt: "t", queues: [], workers: [] }),
   getQueueFailedJobs: jest.fn(),
+  getQueueActiveJobs: jest.fn(),
+  getRedisHealth: jest.fn().mockResolvedValue({
+    usedMemoryBytes: null,
+    usedMemoryHuman: null,
+    connectedClients: null,
+    opsPerSec: null,
+    workerConnections: 0,
+    heartbeatPods: 0,
+    reconciled: true,
+  }),
+  retryFailedJob: jest.fn(),
+  removeFailedJob: jest.fn(),
+  formatFileSize: (b: number) => `${b} B`,
 }));
 
 describe("AdminQueuesPage", () => {
