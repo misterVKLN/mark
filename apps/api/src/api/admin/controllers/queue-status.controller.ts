@@ -119,7 +119,10 @@ export class QueueStatusController {
   }
 
   @Post(":queueName/jobs/:jobId/retry")
-  @Roles(UserRole.ADMIN)
+  // Admin-only is enforced by AdminGuard (it rejects non-admin sessions). No
+  // @Roles here: the global RolesGlobalGuard runs before AdminGuard, and this
+  // POST path has no UserSessionMiddleware session, so @Roles would 403 every
+  // caller (no session) before AdminGuard can authorize a real admin.
   // Mutating + cost-bearing: rate-limit per the admin auth flow's strict tier.
   @UseGuards(ThrottlerGuard)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
@@ -150,7 +153,7 @@ export class QueueStatusController {
   }
 
   @Delete(":queueName/jobs/:jobId")
-  @Roles(UserRole.ADMIN)
+  // Admin-only via AdminGuard (see retry above); no @Roles on this DELETE path.
   @UseGuards(ThrottlerGuard)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({ summary: "Remove a single failed job (ADMIN only)" })
