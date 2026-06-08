@@ -11,6 +11,7 @@ import {
   UserSession,
 } from "../../auth/interfaces/user.session.interface";
 import { PrismaService } from "../../database/prisma.service";
+import { ConcurrencyLimiter } from "../llm/features/grading/services/concurrency-limiter";
 import {
   Choice,
   QuestionDto,
@@ -1139,7 +1140,25 @@ export class AdminService {
     search?: string,
   ) {
     const isAdmin = adminSession.role === UserRole.ADMIN;
-    const skip = (page - 1) * limit;
+
+    // Stopgap pool guard: cap how many assignments one analytics request
+    // processes. This endpoint runs several grouped queries plus a per-assignment
+    // cost computation; the dashboard table requested limit=1000, letting a
+    // single request fan out across the whole table and starve the Postgres
+    // connection pool for everyone else. Bound the page server-side (the
+    // authoritative limit, regardless of what the client sends) until proper
+    // server-side pagination/search lands.
+    const MAX_ANALYTICS_PAGE_LIMIT = 50;
+    const safeLimit = Math.min(
+      Math.max(1, Number.isFinite(limit) ? Math.trunc(limit) : 10),
+      MAX_ANALYTICS_PAGE_LIMIT,
+    );
+    const skip = (Math.max(1, page) - 1) * safeLimit;
+
+    // How many assignments' cost chains may compute at once. Each chain does
+    // uncached per-row pricing lookups (one pool connection at a time), so this
+    // bounds how many connections this endpoint can hold concurrently.
+    const COST_CALC_CONCURRENCY = 4;
 
     const searchCondition = search
       ? {
@@ -1172,7 +1191,7 @@ export class AdminService {
     const assignments = await this.prisma.assignment.findMany({
       where: whereClause,
       skip,
-      take: limit,
+      take: safeLimit,
       select: {
         id: true,
         name: true,
@@ -1188,8 +1207,8 @@ export class AdminService {
         pagination: {
           total: totalCount,
           page,
-          limit,
-          totalPages: Math.ceil(totalCount / limit),
+          limit: safeLimit,
+          totalPages: Math.ceil(totalCount / safeLimit),
         },
       };
     }
@@ -1232,16 +1251,29 @@ export class AdminService {
           return { totalStatsMap, submittedStatsMap };
         }),
 
-        Promise.all(
-          assignmentIds.map(async (assignmentId) => {
-            const uniqueUsers = await this.prisma.assignmentAttempt.findMany({
-              where: { assignmentId },
-              distinct: ["userId"],
-              select: { userId: true },
-            });
-            return { assignmentId, uniqueUsersCount: uniqueUsers.length };
+        // Distinct learners per assignment in ONE query: grouping by
+        // (assignmentId, userId) yields one row per unique pair, so counting
+        // rows per assignmentId is the unique-learner count. Replaces a
+        // per-assignment findMany (one Postgres query each) that fanned out
+        // across the whole page.
+        this.prisma.assignmentAttempt
+          .groupBy({
+            by: ["assignmentId", "userId"],
+            where: { assignmentId: { in: assignmentIds } },
+          })
+          .then((pairs) => {
+            const counts = new Map<number, number>();
+            for (const pair of pairs) {
+              counts.set(
+                pair.assignmentId,
+                (counts.get(pair.assignmentId) ?? 0) + 1,
+              );
+            }
+            return assignmentIds.map((assignmentId) => ({
+              assignmentId,
+              uniqueUsersCount: counts.get(assignmentId) ?? 0,
+            }));
           }),
-        ),
 
         this.prisma.assignmentFeedback.groupBy({
           by: ["assignmentId"],
@@ -1263,8 +1295,39 @@ export class AdminService {
       uniqueLearnersStats.map((s) => [s.assignmentId, s.uniqueUsersCount]),
     );
     const feedbackMap = new Map(feedbackStats.map((s) => [s.assignmentId, s]));
-    const analyticsData = await Promise.all(
-      assignments.map(async (assignment) => {
+
+    // All AI usage for the page in ONE query, grouped in memory — replaces a
+    // per-assignment aIUsage.findMany inside the map below that issued one
+    // Postgres query per assignment (the second source of pool fan-out).
+    const aiUsageRows = await this.prisma.aIUsage.findMany({
+      where: { assignmentId: { in: assignmentIds } },
+      select: {
+        assignmentId: true,
+        tokensIn: true,
+        tokensOut: true,
+        createdAt: true,
+        usageType: true,
+        modelKey: true,
+      },
+    });
+    const aiUsageByAssignment = new Map<number, typeof aiUsageRows>();
+    for (const usage of aiUsageRows) {
+      const existing = aiUsageByAssignment.get(usage.assignmentId);
+      if (existing) {
+        existing.push(usage);
+      } else {
+        aiUsageByAssignment.set(usage.assignmentId, [usage]);
+      }
+    }
+
+    // Cost calculation does an uncached per-row pricing lookup, so running
+    // every assignment's cost chain at once would hold one pool connection per
+    // assignment and could starve the pool. Bound how many run concurrently.
+    // (The per-row lookup volume itself is left to the pricing-batching fix.)
+    const analyticsData = await new ConcurrencyLimiter(
+      COST_CALC_CONCURRENCY,
+    ).run(
+      assignments.map((assignment) => async () => {
         const totalAttempts = totalStatsMap.get(assignment.id) || 0;
         const submittedData = submittedStatsMap.get(assignment.id);
         const completedAttempts = submittedData?._count.id || 0;
@@ -1273,16 +1336,7 @@ export class AdminService {
         const averageGrade = (submittedData?._avg.grade || 0) * 100;
         const averageRating = feedback?._avg.assignmentRating || 0;
 
-        const aiUsageDetails = await this.prisma.aIUsage.findMany({
-          where: { assignmentId: assignment.id },
-          select: {
-            tokensIn: true,
-            tokensOut: true,
-            createdAt: true,
-            usageType: true,
-            modelKey: true,
-          },
-        });
+        const aiUsageDetails = aiUsageByAssignment.get(assignment.id) ?? [];
 
         const costData = await this.calculateHistoricalCosts(aiUsageDetails);
         const totalCost = costData.totalCost;
@@ -1350,8 +1404,8 @@ export class AdminService {
       pagination: {
         total: totalCount,
         page,
-        limit,
-        totalPages: Math.ceil(totalCount / limit),
+        limit: safeLimit,
+        totalPages: Math.ceil(totalCount / safeLimit),
       },
     };
   }
