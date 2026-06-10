@@ -7,6 +7,10 @@ import { AssignmentServiceV2 } from "../assignment/v2/services/assignment.servic
 import { AssignmentFileService } from "../assignment/v2/services/assignment-file.service";
 import { JobStatusServiceV2 } from "../assignment/v2/services/job-status.service";
 import { QuestionService } from "../assignment/v2/services/question.service";
+import {
+  UserRole,
+  type UserSession,
+} from "../../auth/interfaces/user.session.interface";
 import { AssignmentTypeEnum } from "../llm/features/question-generation/services/question-generation.service";
 import { LLM_PRICING_SERVICE } from "../llm/llm.constants";
 import {
@@ -29,13 +33,26 @@ const noopDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
 const makeMockPrisma = () => ({
   questionResponse: { deleteMany: noopDeleteMany },
   assignmentAttemptQuestionVariant: { deleteMany: noopDeleteMany },
-  assignmentAttempt: { deleteMany: noopDeleteMany },
+  assignmentAttempt: {
+    deleteMany: noopDeleteMany,
+    groupBy: jest.fn().mockResolvedValue([]),
+    findMany: jest.fn().mockResolvedValue([]),
+  },
   assignmentGroup: { deleteMany: noopDeleteMany },
-  assignmentFeedback: { deleteMany: noopDeleteMany },
+  assignmentFeedback: {
+    deleteMany: noopDeleteMany,
+    groupBy: jest.fn().mockResolvedValue([]),
+    aggregate: jest
+      .fn()
+      .mockResolvedValue({ _avg: { assignmentRating: null } }),
+  },
   regradingRequest: { deleteMany: noopDeleteMany },
   report: { deleteMany: noopDeleteMany },
   assignmentTranslation: { deleteMany: noopDeleteMany },
-  aIUsage: { deleteMany: noopDeleteMany },
+  aIUsage: {
+    deleteMany: noopDeleteMany,
+    findMany: jest.fn().mockResolvedValue([]),
+  },
   question: { deleteMany: noopDeleteMany },
   assignment: {
     findUnique: jest.fn().mockResolvedValue({
@@ -44,6 +61,8 @@ const makeMockPrisma = () => ({
       type: AssignmentType.AI_GRADED,
     }),
     delete: jest.fn().mockResolvedValue(undefined),
+    count: jest.fn().mockResolvedValue(0),
+    findMany: jest.fn().mockResolvedValue([]),
   },
 });
 
@@ -97,6 +116,7 @@ describe("AdminService", () => {
     mockLlmPricingService = {
       calculateCost: jest.fn().mockReturnValue(0.01),
       getTokenCount: jest.fn().mockReturnValue(100),
+      calculateCostBatch: jest.fn().mockResolvedValue([]),
       calculateCostWithBreakdown: jest.fn().mockResolvedValue({
         totalCost: 0.01,
         inputCost: 0.005,
@@ -182,19 +202,10 @@ describe("AdminService", () => {
       mockPrisma.aIUsage.findMany = jest.fn().mockResolvedValue([]);
     });
 
-    it("clamps an oversized requested limit to the page cap", async () => {
-      const result = await service.getAssignmentAnalytics(
-        adminSession,
-        1,
-        1000,
-      );
-
-      // The page the DB is asked for is bounded regardless of the request.
-      expect(mockPrisma.assignment.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ take: 50 }),
-      );
-      expect(result.pagination.limit).toBe(50);
-    });
+    // NOTE: #527's service-level page-size clamp was dropped in favour of the
+    // authoritative controller cap (MAX_LIMIT=25, which 400s oversized limits).
+    // That behaviour is covered by the controller spec; there is no service
+    // clamp to test here anymore.
 
     it("derives unique learners with ONE grouped query, not one per assignment", async () => {
       await service.getAssignmentAnalytics(adminSession, 1, 1000);
@@ -205,10 +216,12 @@ describe("AdminService", () => {
       expect(pairCalls).toHaveLength(1);
     });
 
-    it("batches AI usage into ONE query scoped to the page's assignments", async () => {
+    it("batches AI usage into batched queries (page + full-set), never per-assignment", async () => {
       await service.getAssignmentAnalytics(adminSession, 1, 1000);
 
-      expect(mockPrisma.aIUsage.findMany).toHaveBeenCalledTimes(1);
+      // Two batched scans, each with an `in` filter — one for the page, one for
+      // the filter-wide aggregates — instead of one findMany per assignment.
+      expect(mockPrisma.aIUsage.findMany).toHaveBeenCalledTimes(2);
       expect(mockPrisma.aIUsage.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { assignmentId: { in: [1, 2] } },
@@ -231,16 +244,23 @@ describe("AdminService", () => {
 
     it("bounds how many assignment cost chains hit pricing lookups concurrently", async () => {
       const ids = [1, 2, 3, 4, 5, 6];
-      mockPrisma.assignment.findMany = jest.fn().mockResolvedValue(
-        ids.map((id) => ({
-          id,
-          name: `A${id}`,
-          published: true,
-          updatedAt: new Date(),
-        })),
+      // Return the page rows for the paged query (has `take`), but no rows for
+      // the id-only aggregate query — that isolates this test to the per-page
+      // cost chains (the limiter's job), excluding the single full-set aggregate
+      // cost call which runs outside the limiter.
+      mockPrisma.assignment.findMany = jest.fn((args: any) =>
+        Promise.resolve(
+          args?.take === undefined
+            ? []
+            : ids.map((id) => ({
+                id,
+                name: `A${id}`,
+                published: true,
+                updatedAt: new Date(),
+              })),
+        ),
       );
-      // Every assignment has AI usage, so each cost chain calls the (uncached,
-      // DB-backed) pricing lookup at least once.
+      // Every assignment has AI usage, so each cost chain calls pricing.
       mockPrisma.aIUsage.findMany = jest.fn().mockResolvedValue(
         ids.map((assignmentId) => ({
           assignmentId,
@@ -254,22 +274,26 @@ describe("AdminService", () => {
 
       let active = 0;
       let maxActive = 0;
-      mockLlmPricingService.calculateCostWithBreakdown.mockImplementation(
-        async () => {
+      // Cost now flows through the batched pricing call (one per assignment's
+      // cost chain); the limiter caps how many run at once.
+      mockLlmPricingService.calculateCostBatch.mockImplementation(
+        async (records: Array<unknown>) => {
           active += 1;
           maxActive = Math.max(maxActive, active);
           // Yield so concurrent chains overlap inside the limiter.
           await new Promise((resolve) => setImmediate(resolve));
           active -= 1;
-          return {
-            totalCost: 0.01,
+          return records.map(() => ({
+            inputTokens: 10,
+            outputTokens: 5,
             inputCost: 0.005,
             outputCost: 0.005,
+            totalCost: 0.01,
+            modelKey: "gpt-4o",
+            pricingEffectiveDate: new Date(),
             inputTokenPrice: 0.000_001,
             outputTokenPrice: 0.000_002,
-            pricingEffectiveDate: new Date(),
-            modelKey: "gpt-4o",
-          };
+          }));
         },
       );
 
@@ -464,6 +488,228 @@ describe("AdminService", () => {
         service.publishAssignment(404, { questions: [] } as any),
       ).rejects.toThrow(NotFoundException);
       expect(mockAssignmentService.publishAssignment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getAssignmentAnalytics", () => {
+    const adminSession = {
+      userId: "admin-1",
+      role: UserRole.ADMIN,
+    } as unknown as UserSession;
+
+    // The assignment.findMany is called twice: once for the paged listing
+    // (carries `take`) and once id-only for the filter-wide aggregate set.
+    // Route each call to the right fixture by inspecting the args.
+    const setAssignments = (
+      pageRows: Array<{
+        id: number;
+        name: string;
+        published: boolean;
+        updatedAt: Date;
+      }>,
+      allMatchingIds: number[],
+    ) => {
+      mockPrisma.assignment.findMany.mockImplementation((args: any) =>
+        args?.take === undefined
+          ? Promise.resolve(allMatchingIds.map((id) => ({ id })))
+          : Promise.resolve(pageRows),
+      );
+    };
+
+    // Route assignmentAttempt.findMany: the aggregate path asks for distinct
+    // (assignmentId, userId) pairs; the per-row path asks for distinct userId.
+    const setAttemptFindMany = (
+      pairRows: Array<{ assignmentId: number; userId: string }>,
+      perRowUsers: Array<{ userId: string }> = [],
+    ) => {
+      mockPrisma.assignmentAttempt.findMany.mockImplementation((args: any) =>
+        Array.isArray(args?.distinct) && args.distinct.includes("assignmentId")
+          ? Promise.resolve(pairRows)
+          : Promise.resolve(perRowUsers),
+      );
+    };
+
+    const pageRow = (id: number, published = true) => ({
+      id,
+      name: `Assignment ${id}`,
+      published,
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    });
+
+    it("orders the paged query by the requested sortBy/sortOrder", async () => {
+      mockPrisma.assignment.count.mockResolvedValue(1);
+      setAssignments([pageRow(1)], [1]);
+
+      await service.getAssignmentAnalytics(
+        adminSession,
+        1,
+        25,
+        undefined,
+        false,
+        "name",
+        "asc",
+      );
+
+      const pagedCall = mockPrisma.assignment.findMany.mock.calls.find(
+        ([args]) => args?.take !== undefined,
+      );
+      expect(pagedCall?.[0].orderBy).toEqual({ name: "asc" });
+    });
+
+    it("defaults the order to updatedAt desc when no sort is given", async () => {
+      mockPrisma.assignment.count.mockResolvedValue(1);
+      setAssignments([pageRow(1)], [1]);
+
+      await service.getAssignmentAnalytics(adminSession, 1, 25);
+
+      const pagedCall = mockPrisma.assignment.findMany.mock.calls.find(
+        ([args]) => args?.take !== undefined,
+      );
+      expect(pagedCall?.[0].orderBy).toEqual({ updatedAt: "desc" });
+    });
+
+    it("filters by published when the flag is provided", async () => {
+      setAssignments([], []);
+
+      await service.getAssignmentAnalytics(
+        adminSession,
+        1,
+        25,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        true,
+      );
+
+      // The filtered-id scan (the source of the total) carries the filter.
+      expect(mockPrisma.assignment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ published: true }),
+          select: { id: true },
+        }),
+      );
+    });
+
+    it("omits the published filter entirely when the flag is undefined", async () => {
+      setAssignments([], []);
+
+      await service.getAssignmentAnalytics(adminSession, 1, 25);
+
+      const idScan = mockPrisma.assignment.findMany.mock.calls.find(
+        ([args]: [{ take?: number }]) => args?.take === undefined,
+      );
+      expect(idScan?.[0].where).not.toHaveProperty("published");
+    });
+
+    it("reports pagination.total from the full filtered set, not the page size", async () => {
+      setAssignments([pageRow(1), pageRow(2)], [1, 2, 3, 4, 5, 6, 7]);
+
+      const result = await service.getAssignmentAnalytics(
+        adminSession,
+        1,
+        25,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        true,
+      );
+
+      expect(result.pagination).toEqual({
+        total: 7,
+        page: 1,
+        limit: 25,
+        totalPages: 1,
+      });
+      // The filtered-id scan (the source of the total) carries the same filter.
+      expect(mockPrisma.assignment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ published: true }),
+          select: { id: true },
+        }),
+      );
+    });
+
+    it("computes aggregates over the full filtered set, not just the page", async () => {
+      mockPrisma.assignment.count.mockResolvedValue(50);
+      setAssignments(
+        [pageRow(1), pageRow(2)], // page shows 2 rows
+        Array.from({ length: 50 }, (_, i) => i + 1), // 50 match the filter
+      );
+      setAttemptFindMany(
+        Array.from({ length: 30 }, (_, i) => ({
+          assignmentId: i,
+          userId: `u${i}`,
+        })),
+      );
+      mockPrisma.assignmentFeedback.aggregate.mockResolvedValue({
+        _avg: { assignmentRating: 4.5 },
+      });
+
+      const result = await service.getAssignmentAnalytics(adminSession, 1, 25);
+
+      expect(result.data).toHaveLength(2);
+      expect(result.aggregates).toEqual({
+        totalAssignments: 50, // from count, not page length
+        totalCost: 0,
+        totalLearnerAssignmentPairs: 30, // from the full distinct-pair set
+        averageRating: 4.5,
+      });
+    });
+
+    it("still returns populated aggregates when the requested page is empty", async () => {
+      mockPrisma.assignment.count.mockResolvedValue(5);
+      setAssignments([], [1, 2, 3, 4, 5]); // out-of-range page, but matches exist
+      setAttemptFindMany([
+        { assignmentId: 1, userId: "u1" },
+        { assignmentId: 1, userId: "u2" },
+      ]);
+      mockPrisma.assignmentFeedback.aggregate.mockResolvedValue({
+        _avg: { assignmentRating: 3 },
+      });
+
+      const result = await service.getAssignmentAnalytics(
+        adminSession,
+        999,
+        25,
+      );
+
+      expect(result.data).toEqual([]);
+      expect(result.pagination).toEqual({
+        total: 5,
+        page: 999,
+        limit: 25,
+        totalPages: 1,
+      });
+      expect(result.aggregates).toEqual({
+        totalAssignments: 5,
+        totalCost: 0,
+        totalLearnerAssignmentPairs: 2,
+        averageRating: 3,
+      });
+    });
+
+    it("short-circuits to empty aggregates when nothing matches the filter", async () => {
+      mockPrisma.assignment.count.mockResolvedValue(0);
+      setAssignments([], []);
+
+      const result = await service.getAssignmentAnalytics(
+        adminSession,
+        1,
+        25,
+        "no-such-assignment",
+      );
+
+      expect(result.data).toEqual([]);
+      expect(result.aggregates).toEqual({
+        totalAssignments: 0,
+        totalCost: 0,
+        totalLearnerAssignmentPairs: 0,
+        averageRating: 0,
+      });
+      // The aggregate query work is skipped entirely for an empty match set.
+      expect(mockPrisma.assignmentFeedback.aggregate).not.toHaveBeenCalled();
     });
   });
 
