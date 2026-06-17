@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable unicorn/no-null */
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -48,6 +49,7 @@ import {
   UserSessionRequest,
 } from "../../../auth/interfaces/user.session.interface";
 import { PrismaService } from "../../../database/prisma.service";
+import { LearnerFacingGradingError } from "../../llm/features/grading/errors/learner-facing-grading.error";
 import {
   AssignmentAttemptWithRelations,
   AttemptQuestionsMapper,
@@ -96,14 +98,27 @@ export class AttemptSubmissionService {
     userSession: UserSession,
     language: string,
   ): Promise<CreateQuestionResponseAttemptResponseDto> {
-    const responseDto =
-      await this.questionResponseService.createQuestionResponse(
+    let responseDto: CreateQuestionResponseAttemptResponseDto;
+    try {
+      responseDto = await this.questionResponseService.createQuestionResponse(
         attemptId,
         { ...requestDto, id: questionId },
         userSession.role,
         assignmentId,
         language,
       );
+    } catch (error) {
+      // The grading layers deliberately let these typed terminal errors pass
+      // through un-wrapped so the job worker can classify them as
+      // non-retryable. This autosave route is the one HTTP entry that reaches
+      // the same code; translate it here so the learner sees a clear 400 with
+      // the learner-facing reason instead of a generic 500 from the global
+      // filter.
+      if (error instanceof LearnerFacingGradingError) {
+        throw new BadRequestException(error.learnerMessage);
+      }
+      throw error;
+    }
 
     await this.prisma.questionResponse.deleteMany({
       where: {

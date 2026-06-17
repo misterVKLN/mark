@@ -1,9 +1,12 @@
 import { Logger } from "@nestjs/common";
 import { Job, UnrecoverableError, Worker } from "bullmq";
+import { writeFile } from "node:fs/promises";
 import IORedis from "ioredis";
 import { JobExecutorService } from "../../api/src/job-queue/job-executor.service";
 import { JobStateService } from "../../api/src/job-queue/job-state.service";
 import type { GradingProgressService } from "../../api/src/api/attempt/services/grading-progress.service";
+import { OversizedSubmissionError } from "../../api/src/api/llm/features/grading/errors/oversized-submission.error";
+import { UnsupportedImageFormatError } from "../../api/src/api/llm/features/grading/errors/unsupported-image-format.error";
 import { JOB_NAMES, JOB_QUEUE_NAMES } from "./job-queue.constants";
 import { encryptJobPayload } from "./job-payload.crypto";
 import {
@@ -107,6 +110,10 @@ jest.mock("bullmq", () => {
 
 jest.mock("./redis.connection", () => ({
   createRedisConnection: jest.fn(),
+}));
+
+jest.mock("node:fs/promises", () => ({
+  writeFile: jest.fn().mockResolvedValue(undefined),
 }));
 
 // Mock the cross-package JobExecutorService module at the boundary. apps/api
@@ -286,6 +293,18 @@ describe("JobWorkerService", () => {
     ] as [string, RequestInit];
     expect(JSON.parse(requestInit.body as string)).toEqual(expected);
   }
+
+  it("writes the local liveness file the exec probe checks when the heartbeat starts", async () => {
+    await service.onModuleInit();
+
+    // The livenessProbe in helm-chart/mark-jobs is an exec check on this path;
+    // the worker must rewrite it as soon as the heartbeat starts so the file
+    // exists before the probe's initial delay elapses.
+    expect(writeFile).toHaveBeenCalledWith(
+      "/tmp/mark-jobs-worker.heartbeat",
+      expect.any(String),
+    );
+  });
 
   it("creates one worker per queue with the expected concurrency and lifecycle hooks", async () => {
     await service.onModuleInit();
@@ -1289,13 +1308,107 @@ describe("JobWorkerService", () => {
       expect((thrown as Error).message).toMatch(/OversizedSubmissionError/);
       expect(mockConnection.pipeline).not.toHaveBeenCalled();
       expect(mockStructuredLogger.error).toHaveBeenCalledWith(
-        "attempt.grade.oversized",
+        "attempt.grade.learner.terminal",
         expect.objectContaining({
           attemptId: 861298,
           assignmentId: 2537,
           errorClass: "OversizedSubmissionError",
         }),
       );
+    });
+
+    it("surfaces learnerMessage when a typed OversizedSubmissionError survives", async () => {
+      const oversized = new OversizedSubmissionError({
+        blockCount: 60_000,
+        cap: 50_000,
+        filename: "huge.xlsx",
+      });
+      mockJobExecutorService.executeJob.mockRejectedValueOnce(oversized);
+
+      let thrown: unknown;
+      try {
+        await asTestAccessor(service).handleAttemptJob(makeAttemptJob());
+      } catch (err) {
+        thrown = err;
+      }
+
+      expect(thrown).toBeInstanceOf(UnrecoverableError);
+      expect((thrown as Error).name).toBe("UnrecoverableError");
+      expect((thrown as Error).message).toBe(oversized.learnerMessage);
+      expect(mockConnection.pipeline).not.toHaveBeenCalled();
+      expect(mockStructuredLogger.error).toHaveBeenCalledWith(
+        "attempt.grade.learner.terminal",
+        expect.objectContaining({
+          attemptId: 861298,
+          assignmentId: 2537,
+          errorClass: "OversizedSubmissionError",
+        }),
+      );
+    });
+
+    it("keeps name-only OversizedSubmissionError terminal with the technical reason", async () => {
+      const nameOnly = new Error("Submission would produce 60000 blocks");
+      nameOnly.name = "OversizedSubmissionError";
+      mockJobExecutorService.executeJob.mockRejectedValueOnce(nameOnly);
+
+      let thrown: unknown;
+      try {
+        await asTestAccessor(service).handleAttemptJob(makeAttemptJob());
+      } catch (err) {
+        thrown = err;
+      }
+
+      expect(thrown).toBeInstanceOf(UnrecoverableError);
+      expect((thrown as Error).message).toMatch(/^OversizedSubmissionError: /);
+      expect(mockConnection.pipeline).not.toHaveBeenCalled();
+    });
+
+    it("surfaces learnerMessage when a typed UnsupportedImageFormatError survives", async () => {
+      const unsupported = new UnsupportedImageFormatError({
+        filename: "photo.heic",
+        detectedFormat: "image/heic",
+        reason: "unsupported format detected at grade time",
+      });
+      mockJobExecutorService.executeJob.mockRejectedValueOnce(unsupported);
+
+      let thrown: unknown;
+      try {
+        await asTestAccessor(service).handleAttemptJob(makeAttemptJob());
+      } catch (err) {
+        thrown = err;
+      }
+
+      expect(thrown).toBeInstanceOf(UnrecoverableError);
+      expect((thrown as Error).name).toBe("UnrecoverableError");
+      expect((thrown as Error).message).toBe(unsupported.learnerMessage);
+      expect(mockConnection.pipeline).not.toHaveBeenCalled();
+      expect(mockStructuredLogger.error).toHaveBeenCalledWith(
+        "attempt.grade.learner.terminal",
+        expect.objectContaining({
+          attemptId: 861298,
+          assignmentId: 2537,
+          errorClass: "UnsupportedImageFormatError",
+        }),
+      );
+    });
+
+    it("keeps name-only UnsupportedImageFormatError terminal with the technical reason", async () => {
+      const nameOnly = new Error("Unsupported image format (image/heic)");
+      nameOnly.name = "UnsupportedImageFormatError";
+      mockJobExecutorService.executeJob.mockRejectedValueOnce(nameOnly);
+
+      let thrown: unknown;
+      try {
+        await asTestAccessor(service).handleAttemptJob(makeAttemptJob());
+      } catch (err) {
+        thrown = err;
+      }
+
+      expect(thrown).toBeInstanceOf(UnrecoverableError);
+      expect((thrown as Error).message).toMatch(
+        /^UnsupportedImageFormatError: /,
+      );
+      expect(mockConnection.pipeline).not.toHaveBeenCalled();
     });
 
     it("rethrows original error on the first OOM strike and records INCR+EXPIRE", async () => {
