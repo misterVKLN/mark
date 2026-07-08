@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Toaster } from "sonner";
 import { MarkChat } from "../app/chatbot/components/MarkChat";
 import AuthorStoreBridge from "../app/chatbot/store/AuthorStoreBridge";
+import ReportBugButton from "@/components/ReportBugButton";
 import { useChatbot } from "../hooks/useChatbot";
 import ErrorModal from "@/components/ErrorModal";
 import {
@@ -81,6 +82,8 @@ export default function LayoutContent({ children }: { children: ReactNode }) {
       </div>
 
       {hideMarkChat ? null : <MarkChat />}
+      {/* Bug reporting stays available even when the AI chat is disabled. */}
+      {pathname?.startsWith("/admin") ? null : <ReportBugButton />}
     </div>
   );
 }
