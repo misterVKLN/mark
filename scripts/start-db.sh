@@ -44,11 +44,9 @@ echo "🔍 Checking database container status..."
 # Source environment variables
 if [ -f "dev.env" ]; then
     # shellcheck source=/dev/null
+    set -a
     source dev.env
-    export POSTGRES_USER
-    export POSTGRES_PASSWORD
-    export POSTGRES_DB
-    export POSTGRES_EXTERNAL_PORT
+    set +a
 else
     echo "⚠️  Warning: dev.env file not found, using defaults"
 fi
