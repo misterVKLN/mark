@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { Toaster } from "sonner";
 import { MarkChat } from "../app/chatbot/components/MarkChat";
 import AuthorStoreBridge from "../app/chatbot/store/AuthorStoreBridge";
-import ReportBugButton from "@/components/ReportBugButton";
 import { useChatbot } from "../hooks/useChatbot";
 import { useTheme } from "../hooks/useTheme";
 import ErrorModal from "@/components/ErrorModal";
@@ -85,8 +84,10 @@ export default function LayoutContent({ children }: { children: ReactNode }) {
       </div>
 
       {hideMarkChat ? null : <MarkChat />}
-      {/* Bug reporting stays available even when the AI chat is disabled. */}
-      {pathname?.startsWith("/admin") ? null : <ReportBugButton />}
+      {/* ReportBugButton is deliberately not rendered: submitting a report
+          opens a GitHub issue in GITHUB_OWNER/GITHUB_REPO and fire-and-forget
+          publishes the title, description and severity to Skills Network's
+          NATS broker (see FloService). Neither belongs in this deployment. */}
     </div>
   );
 }
