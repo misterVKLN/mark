@@ -33,6 +33,8 @@ const config: Config = {
       colors: {
         // UNI-Test rebrand
         violet: colors.sky,
+        purple: colors.sky,
+        indigo: colors.sky,
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
