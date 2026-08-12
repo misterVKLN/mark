@@ -7,7 +7,7 @@ export default async function Home() {
   const headerList = await headers();
   const cookie = headerList.get("cookie");
   if (!cookie && process.env.NODE_ENV === "production") {
-    redirect("https://skills.network");
+    redirect("https://intela-edu.online/login");
   }
   const user = await getUser(cookie);
 

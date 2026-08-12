@@ -22,11 +22,15 @@ const INSTANA_KEYS = {
 } as const;
 
 export const metadata: Metadata = {
-  title: "Mark",
+  title: "UNI-Test",
   description: "Grade your learners' work with the power of AI.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
   keywords: [
-    "mark",
-    "skills network",
+    "uni-test",
+    "intela education",
     "ai",
     "AI graded assignments",
     "online learning",
@@ -41,6 +45,10 @@ export const metadata: Metadata = {
     {
       name: "Rami Maalouf",
       url: "https://rami-maalouf.tech",
+    },
+    {
+      name: "Intela Education",
+      url: "https://intela-edu.online",
     },
   ],
 };

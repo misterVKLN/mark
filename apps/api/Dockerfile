@@ -47,7 +47,7 @@ WORKDIR ${DIR}
 # hadolint ignore=DL3008
 RUN apt-get update -y \
   && apt-get install -y --no-install-recommends \
-     dumb-init postgresql-client openssl ca-certificates \
+     dumb-init postgresql-client openssl ca-certificates dos2unix \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
@@ -58,6 +58,8 @@ COPY --chown=node:node --from=installer ${DIR}/apps/api/prisma ./prisma
 COPY --chown=node:node --from=build ${DIR}/apps/api/migrate.sh ./migrate.sh
 COPY --chown=node:node --from=build ${DIR}/apps/api/ensureDb.js ./ensureDb.js
 COPY --chown=node:node --from=build ${DIR}/apps/api/src/scripts ./scripts
+
+RUN dos2unix ./migrate.sh && chmod +x ./migrate.sh
 
 USER node
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]

@@ -41,13 +41,15 @@ ENV NODE_ENV production
 WORKDIR $DIR
 RUN ls 
 
-RUN apk add --no-cache dumb-init~=1
+RUN apk add --no-cache dumb-init~=1 dos2unix
 COPY --chown=node:node --from=sourcer $DIR/apps/web/.next ./.next
 COPY --chown=node:node --from=sourcer $DIR/apps/web/package.json ./package.json
 COPY --chown=node:node --from=sourcer $DIR/node_modules $DIR/node_modules
 COPY --chown=node:node --from=sourcer $DIR/apps/web/public ./public
 COPY --chown=node:node --from=sourcer $DIR/apps/web/scripts/prepare-next-start.js ./scripts/prepare-next-start.js
 COPY --chown=node:node --from=sourcer $DIR/apps/web/entrypoint.sh ./entrypoint.sh
+
+RUN dos2unix ./entrypoint.sh && chmod +x ./entrypoint.sh
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["./entrypoint.sh"]
