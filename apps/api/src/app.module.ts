@@ -20,7 +20,6 @@ import { HealthModule } from "./health/health.module";
 import { JobQueueModule } from "./job-queue/job-queue.module";
 import { winstonOptions } from "./logger/config";
 import { LoggerMiddleware } from "./logger/logger.middleware";
-import { MessagingModule } from "./messaging/messaging.module";
 import { routes } from "./routes";
 
 @Module({
@@ -32,7 +31,6 @@ import { routes } from "./routes";
     ApiModule,
     ScheduledTasksModule,
     RouterModule.register(routes),
-    MessagingModule,
     AuthModule,
     AdminAuthModule,
     DatabaseModule,

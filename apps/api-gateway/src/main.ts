@@ -1,7 +1,3 @@
-if (process.env.NODE_ENV === "production") {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-var-requires, unicorn/prefer-module
-  require("@instana/collector")({ autoProfile: true });
-}
 import { VersioningType } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
@@ -19,7 +15,7 @@ async function bootstrap() {
   logger.log(
     `booting pid=${process.pid} node=${process.version} env=${
       process.env.NODE_ENV ?? "<unset>"
-    } instana=${process.env.NODE_ENV === "production" ? "on" : "off"}`,
+    }`,
   );
   logger.log(
     `downstream: MARK_API_ENDPOINT=${

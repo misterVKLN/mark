@@ -26,7 +26,6 @@ import {
   JOB_WORKER_HEARTBEAT_KEY_PREFIX,
 } from "./job-worker-heartbeat.constants";
 import { decryptJobPayload, getJobQueueSecret } from "./job-payload.crypto";
-import { traceJob } from "./instrumentation/instana-job-tracing";
 import { createRedisConnection } from "./redis.connection";
 import { JobExecutorService } from "../../api/src/job-queue/job-executor.service";
 import { JobStateService } from "../../api/src/job-queue/job-state.service";
@@ -350,7 +349,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
   ): Worker {
     const worker = new Worker(
       queueName,
-      (job: Job) => traceJob(queueName, job, async () => processor(job)),
+      (job: Job) => processor(job),
       {
         connection: this.getConnection(),
         concurrency,
@@ -649,8 +648,7 @@ export class JobWorkerService implements OnModuleInit, OnModuleDestroy {
     // Branch 0: idempotent duplicate submit. The attempt was already submitted
     // by the winning job (or this job lost a concurrent commit race), so the
     // grade is already persisted. Returning instead of throwing makes BullMQ
-    // mark the job completed — no retry, no re-grade — and the Instana span
-    // records success rather than an error. Logged at warn, not error, because
+    // mark the job completed — no retry, no re-grade. Logged at warn, not error, because
     // it is an expected outcome of a learner double-submit, not a failure.
     if (JobWorkerService.ALREADY_SUBMITTED_RE.test(reason)) {
       this.structuredLogger.warn("attempt.grade.already.submitted", {

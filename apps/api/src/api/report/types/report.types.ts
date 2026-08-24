@@ -54,50 +54,6 @@ export interface IssueReportResult {
   success: boolean;
 }
 /**
- * Messaging utilities for integration with NATS
- */
-
-/**
- * NATS Server configuration options
- */
-export enum SkillsNetworkNatsServer {
-  STAGING = "nats://nats.staging.skills.network:4222",
-  PRODUCTION = "nats://nats.skills.network:4222",
-}
-
-/**
- * NATS Connection options
- */
-export interface NatsConnectionOptions {
-  user: string;
-  pass: string;
-  organization: string;
-  program: string;
-  project: string;
-  servers: string[];
-  tls: {
-    rejectUnauthorized: boolean;
-  };
-}
-
-/**
- * User message params
- */
-export interface PublishUserMessage {
-  action: string;
-  username: string;
-  data: Record<string, any>;
-  organization: string;
-  program: string;
-  project: string;
-}
-
-/**
- * Default organization
- */
-export const DEFAULT_ORG = "sn";
-
-/**
  * Error severity levels
  */
 export enum ErrorSeverity {

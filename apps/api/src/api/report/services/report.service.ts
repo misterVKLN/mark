@@ -29,7 +29,6 @@ import {
   defaultSeverityForIssueType,
 } from "../helpers/issue-template";
 import { BugRenewalEmailDto, ReportIssueDto } from "../types/report.types";
-import { FloService } from "./flo.service";
 
 interface FeedbackFilterParameters {
   page: number;
@@ -59,7 +58,6 @@ export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
 
   constructor(
-    private readonly floService: FloService,
     private readonly prisma: PrismaService,
     private readonly filesService: FilesService,
     private readonly adminEmailService: AdminEmailService,
@@ -1359,27 +1357,6 @@ A new related issue has been created: #${issue.number}
       }
 
       const report = await this.prisma.report.create({ data: reportData });
-
-      // Fire-and-forget: Flo is best-effort telemetry. Never block the
-      // request on its NATS publish — the underlying ts-nats client opens a
-      // fresh connection per call and has no built-in deadline.
-      void this.floService
-        .sendError(issueTitle, description, {
-          severity: issueSeverity,
-          tags: ["mark", "chat", "report", role || "user", issueType],
-          assignmentId,
-          attemptId,
-          github_issue: issue.number,
-          report_id: report.id,
-          is_duplicate: isDuplicate,
-        })
-        .catch((error) => {
-          this.logger.warn(
-            `Flo sendError dispatch failed for report ${report.id}: ${
-              (error as Error).message
-            }`,
-          );
-        });
 
       let message = `Thank you for your report. Issue #${issue.number} has been created and our team will review it soon. You can check the status of this issue anytime by asking me about your reported issues.`;
 
@@ -2722,19 +2699,6 @@ A new related issue has been created: #${issue.number}
     assignmentId?: number,
   ): Promise<{ message: string; reportId?: number }> {
     try {
-      // Fire-and-forget: see floService.sendError comment in reportIssue.
-      void this.floService
-        .sendFeedback(title, description, {
-          rating,
-          userEmail,
-          portalName: portalName || "Mark AI Assistant",
-        })
-        .catch((error) => {
-          this.logger.warn(
-            `Flo sendFeedback dispatch failed: ${(error as Error).message}`,
-          );
-        });
-
       const issueTitle = `[MARK CHAT] User Feedback: ${title}`;
       const issueBody = `
 ## User Feedback Report

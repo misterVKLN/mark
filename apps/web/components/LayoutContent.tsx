@@ -84,10 +84,8 @@ export default function LayoutContent({ children }: { children: ReactNode }) {
       </div>
 
       {hideMarkChat ? null : <MarkChat />}
-      {/* ReportBugButton is deliberately not rendered: submitting a report
-          opens a GitHub issue in GITHUB_OWNER/GITHUB_REPO and fire-and-forget
-          publishes the title, description and severity to Skills Network's
-          NATS broker (see FloService). Neither belongs in this deployment. */}
+      {/* ReportBugButton is deliberately not rendered: it opens a GitHub
+          issue in GITHUB_OWNER/GITHUB_REPO, which is not set up here. */}
     </div>
   );
 }

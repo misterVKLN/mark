@@ -22,7 +22,6 @@ import { WINSTON_MODULE_PROVIDER } from "nest-winston";
 import { Logger } from "winston";
 import { UserSessionRequest } from "../auth/interfaces/user.session.interface";
 import { dedupeAuthenticationCookieHeader } from "../auth/jwt/cookie-based/jwt.cookie.extractor";
-import { MessagingService } from "../messaging/messaging.service";
 import { DownstreamService } from "./api.controller";
 import { sanitizeForLog } from "../logger/sanitize";
 
@@ -40,7 +39,6 @@ const SENSITIVE_HEADERS = new Set([
 export class ApiService {
   private readonly logger: Logger;
   constructor(
-    private readonly messagingService: MessagingService,
     @Inject(WINSTON_MODULE_PROVIDER) parentLogger: Logger,
   ) {
     this.logger = parentLogger.child({ context: ApiService.name });
@@ -92,7 +90,6 @@ export class ApiService {
 
   rootV1(): Record<string, string | number> {
     this.logger.info("showing api version information");
-    void this.messagingService.publishService("api", {});
     return { version: 1 };
   }
 
