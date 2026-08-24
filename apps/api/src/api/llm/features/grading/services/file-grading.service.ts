@@ -29,6 +29,7 @@ import { IPromptProcessor } from "../../../core/interfaces/prompt-processor.inte
 import { ITokenCounter } from "../../../core/interfaces/token-counter.interface";
 import { LLMResolverService } from "../../../core/services/llm-resolver.service";
 import { Gpt54MiniLlmService } from "../../../core/services/gpt54-llm.service";
+import { getGradingModelCacheIdentity } from "../../../core/utils/grading-cache-identity.util";
 import { isContextLengthExceededError } from "../../../core/utils/llm-error.util";
 import {
   LLM_RESOLVER_SERVICE,
@@ -144,8 +145,12 @@ export class FileGradingService implements IFileGradingService {
     string,
     Promise<FileBasedQuestionResponseModel>
   >();
+  // v5: document uploads are section-chunked with a pinned whole-document
+  // view. The chunking change is invisible to the cache's answer hash (it
+  // hashes structuredContent, which is unchanged), so the version bump is
+  // what invalidates grades produced from the old starved evidence.
   private static readonly EVIDENCE_FILE_GRADER_VERSION =
-    "structured-file-evidence-v4-stable-answer-hash";
+    "structured-file-evidence-v5-doc-sections";
 
   constructor(
     @Inject(PROMPT_PROCESSOR)
@@ -893,6 +898,9 @@ export class FileGradingService implements IFileGradingService {
     modelSnapshot: string;
     grade: () => Promise<FileBasedQuestionResponseModel>;
   }): Promise<FileBasedQuestionResponseModel> {
+    const modelCacheIdentity = getGradingModelCacheIdentity(
+      parameters.modelSnapshot,
+    );
     const answerHash = this.hashCanonical(
       [...parameters.learnerResponse]
         .sort((left, right) =>
@@ -907,7 +915,7 @@ export class FileGradingService implements IFileGradingService {
     );
     const rubricHash = this.hashCanonical({
       graderVersion: FileGradingService.EVIDENCE_FILE_GRADER_VERSION,
-      modelSnapshot: parameters.modelSnapshot,
+      modelSnapshot: modelCacheIdentity,
       reasoningEffort: "none",
       question: parameters.question,
       scoringCriteria: parameters.scoringCriteria,
@@ -927,7 +935,7 @@ export class FileGradingService implements IFileGradingService {
       this.logger.info("Using deterministic structured-file grading cache", {
         questionId: parameters.questionId,
         cacheKey,
-        modelSnapshot: parameters.modelSnapshot,
+        modelSnapshot: modelCacheIdentity,
       });
       return cachedResponse;
     }
@@ -959,7 +967,7 @@ export class FileGradingService implements IFileGradingService {
         hitCount: 0,
         metadata: {
           graderVersion: FileGradingService.EVIDENCE_FILE_GRADER_VERSION,
-          modelSnapshot: parameters.modelSnapshot,
+          modelSnapshot: modelCacheIdentity,
           fileResponse: this.fileResponseForCache(result),
         },
       };
@@ -1206,6 +1214,7 @@ export class FileGradingService implements IFileGradingService {
     const needsRebuild = learnerResponse.some(
       (file) =>
         this.shouldRebuildStructuredContent(file) ||
+        this.isArchiveUploadNeedingStructure(file) ||
         (includeCodeUploads &&
           !file.structuredContent &&
           this.hasExtractedSubmissionText(file)),
@@ -1219,6 +1228,13 @@ export class FileGradingService implements IFileGradingService {
     }
 
     return learnerResponse.map((file) => {
+      if (this.isArchiveUploadNeedingStructure(file)) {
+        return {
+          ...file,
+          structuredContent: this.buildCanonicalSubmissionForArchive(file),
+        };
+      }
+
       if (
         !this.shouldRebuildStructuredContent(file) &&
         !(
@@ -1240,6 +1256,91 @@ export class FileGradingService implements IFileGradingService {
 
       return { ...file, structuredContent };
     });
+  }
+
+  private isArchiveUploadNeedingStructure(file: LearnerFileUpload): boolean {
+    return Boolean(file.archiveEntries?.length) && !file.structuredContent;
+  }
+
+  /**
+   * An archive grades as ONE submission (the pipeline grades the first
+   * eligible file), so its members must become blocks of a single canonical
+   * submission: the listing as structure evidence, then each extracted entry
+   * under its own filename — source entries get the pinned whole-file code
+   * treatment that a bare upload of the same file would get. Without this,
+   * the whole archive is prose-chunked under the .zip filename and evidence
+   * quotes collapse to the short prose cap.
+   */
+  private buildCanonicalSubmissionForArchive(
+    file: LearnerFileUpload,
+  ): CanonicalSubmission {
+    const entries = file.archiveEntries ?? [];
+    const listingText = this.normalizeSubmissionTextForEvidence(
+      file.archiveListing || file.extractedText || file.content || "",
+    );
+
+    const blocks: ContentBlock[] = [];
+    let blockIndex = 1;
+
+    const metadataBlock = this.buildFileMetadataBlock(file, listingText);
+    if (metadataBlock) {
+      blocks.push({
+        ...metadataBlock,
+        blockId: `p1b${blockIndex}`,
+        page: 1,
+      });
+      blockIndex += 1;
+    }
+
+    for (const block of this.splitTextIntoEvidenceBlocks(
+      listingText,
+      blockIndex,
+      { filename: file.filename, questionId: file.questionId },
+    )) {
+      blocks.push(block);
+      blockIndex += 1;
+    }
+
+    for (const entry of entries) {
+      const isCode = isCodeLikeFilename(entry.path);
+      const normalized = isCode
+        ? this.normalizeCodeSubmissionText(entry.text)
+        : this.normalizeSubmissionTextForEvidence(entry.text);
+      if (!normalized.trim()) continue;
+
+      const meta = { filename: entry.path, questionId: file.questionId };
+      const entryBlocks = isCode
+        ? this.buildCodeEvidenceBlocks(normalized, blockIndex, meta)
+        : this.splitTextIntoEvidenceBlocks(normalized, blockIndex, meta);
+      for (const block of entryBlocks) {
+        blocks.push({ ...block, sourceFilename: entry.path });
+        blockIndex += 1;
+      }
+    }
+
+    const combined = [listingText, ...entries.map((entry) => entry.text)].join(
+      "\n",
+    );
+    const wordCount = combined.split(/\s+/).filter(Boolean).length;
+    const checksum = crypto.createHash("sha256").update(combined).digest("hex");
+
+    return {
+      submissionId: file.filename,
+      metadata: {
+        wordCount,
+        pageCount: 1,
+        blockCount: blocks.length,
+        sourceType: "txt",
+        checksum,
+        extractedAt: new Date().toISOString(),
+      },
+      pages: [
+        {
+          pageNumber: 1,
+          blocks,
+        },
+      ],
+    };
   }
 
   private shouldRebuildStructuredContent(file: LearnerFileUpload): boolean {
@@ -1673,18 +1774,59 @@ export class FileGradingService implements IFileGradingService {
   }
 
   // Jupyter notebook extractions carry "=== CELL N [TYPE] ===" section
-  // headers (see FileContentExtractionService.extractJupyterNotebook). Each
-  // cell — with its header and any outputs — becomes one segment. Returns
-  // null when the text is not a notebook extraction.
+  // headers (see FileContentExtractionService.extractJupyterNotebook).
+  // Returns null when the text is not a notebook extraction.
+  //
+  // Cells are grouped into task sections rather than kept one-per-segment: a
+  // rubric criterion's wording matches the markdown task cell, but the work
+  // that satisfies it lives in the code cells that follow. Evidence retrieval
+  // selects whole chunks, so a task's description and its answer code must
+  // share a chunk — a lone markdown cell that parrots the rubric otherwise
+  // outranks the learner's code everywhere and the grader never sees the code.
   private splitNotebookIntoCellSegments(code: string): string[] | null {
     const cellHeader = /^=== CELL \d+ \[/m;
     if (!cellHeader.test(code)) return null;
 
-    const segments = code
+    const cells = code
       .split(/\n(?==== CELL \d+ \[)/)
       .map((segment) => segment.trimEnd())
       .filter((segment) => segment.trim());
-    return segments.length > 0 ? segments : null;
+    if (cells.length === 0) return null;
+
+    // A section starts at each markdown run (a markdown cell whose
+    // predecessor is not markdown) and carries every following cell until the
+    // next run. Sections are bounded by CODE_SEGMENT_MAX_CHARS so they
+    // survive capCodeSegments un-split; a cell that would overflow starts its
+    // own section (the pre-grouping behaviour) rather than shearing the
+    // section mid-cell.
+    const markdownCellHeader = /^=== CELL \d+ \[MARKDOWN]/;
+
+    const sections: string[] = [];
+    let current: string[] = [];
+    let currentSize = 0;
+    let previousWasMarkdown = false;
+
+    for (const cell of cells) {
+      const markdown = markdownCellHeader.test(cell);
+      const startsNewSection =
+        markdown && !previousWasMarkdown && current.length > 0;
+      const overflows =
+        current.length > 0 &&
+        currentSize + cell.length + 1 > CODE_SEGMENT_MAX_CHARS;
+
+      if (startsNewSection || overflows) {
+        sections.push(current.join("\n"));
+        current = [];
+        currentSize = 0;
+      }
+
+      current.push(cell);
+      currentSize += cell.length + 1;
+      previousWasMarkdown = markdown;
+    }
+    if (current.length > 0) sections.push(current.join("\n"));
+
+    return sections;
   }
 
   // Fold trivially short segments (a lone import, a one-line `const`) into an

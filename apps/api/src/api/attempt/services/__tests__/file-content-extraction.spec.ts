@@ -1469,3 +1469,226 @@ describe("FileContentExtractionService - content provenance shadow mode", () => 
     });
   });
 });
+
+// ─── Archive source-file extraction ────────────────────────────────────────
+
+describe("FileContentExtractionService.extractArchiveContent source files", () => {
+  const fixturePath = require("path").join(
+    __dirname,
+    "fixtures",
+    "fixture-xcode.zip",
+  );
+  const fixture = require("fs").readFileSync(fixturePath) as Buffer;
+
+  let service: FileContentExtractionService;
+
+  beforeEach(() => {
+    service = createService();
+  });
+
+  async function extract(
+    filename = "SmartTravelJournal.zip",
+    mime = "application/zip",
+  ) {
+    return (service as any).extractTextFromBuffer(fixture, filename, mime);
+  }
+
+  it("extracts Swift source contents past the legacy per-entry cap", async () => {
+    const result = await extract();
+    const text: string = result.extractedText;
+    expect(text).toContain(
+      "--- CONTENT: SmartTravelJournal/SmartTravelJournal/Trip.swift ---",
+    );
+    expect(text).toContain("@Model");
+    expect(text).toContain("final class Trip");
+    // Lives ~5KB into the file — proves the 1000-char cap no longer applies.
+    expect(text).toContain("sentinelBeyondFirstThousandChars");
+  });
+
+  it("bounds a single source entry at the whole-file block limit", async () => {
+    const result = await extract();
+    const text: string = result.extractedText;
+    expect(text).toContain(
+      "--- CONTENT: SmartTravelJournal/SmartTravelJournal/HugeViewModel.swift ---",
+    );
+    expect(text).toContain("[...truncated...]");
+    expect(text).not.toContain("tailSentinelPastTwelveThousand");
+  });
+
+  it("keeps junk entries out of extracted contents but in the listing", async () => {
+    const result = await extract();
+    const text: string = result.extractedText;
+    const contentHeaders = [...text.matchAll(/^--- CONTENT: (.+) ---$/gm)].map(
+      (m) => m[1],
+    );
+    for (const header of contentHeaders) {
+      expect(header).not.toMatch(/__MACOSX\//);
+      expect(header).not.toMatch(/(^|\/)\.git\//);
+      expect(header).not.toMatch(/(^|\/)\._/);
+      expect(header).not.toMatch(/\.DS_Store$/);
+    }
+    // The listing itself stays complete.
+    expect(text).toMatch(/^SmartTravelJournal\/\.DS_Store \(/m);
+  });
+
+  it("returns per-entry contents and a standalone listing for grading", async () => {
+    const result = await extract();
+    expect(Array.isArray(result.archiveEntries)).toBe(true);
+    const paths = result.archiveEntries.map((e: { path: string }) => e.path);
+    expect(paths).toContain("SmartTravelJournal/SmartTravelJournal/Trip.swift");
+    expect(paths).toContain("SmartTravelJournal/README.md");
+    expect(paths).not.toContain(
+      "__MACOSX/SmartTravelJournal/SmartTravelJournal/._Trip.swift",
+    );
+
+    const trip = result.archiveEntries.find((e: { path: string }) =>
+      e.path.endsWith("Trip.swift"),
+    );
+    expect(trip.text).toContain("sentinelBeyondFirstThousandChars");
+    expect(trip.truncated).toBe(false);
+
+    const huge = result.archiveEntries.find((e: { path: string }) =>
+      e.path.endsWith("HugeViewModel.swift"),
+    );
+    expect(huge.truncated).toBe(true);
+
+    expect(result.archiveListing).toContain("--- FILE LISTING ---");
+    expect(result.archiveListing).not.toContain("--- CONTENT:");
+  });
+
+  it("routes zip MIME aliases without a usable extension to the archive extractor", async () => {
+    const result = await extract("project", "application/x-zip-compressed");
+    expect(result.text).toContain("=== ARCHIVE:");
+    expect(result.text).toContain("--- FILE LISTING ---");
+  });
+
+  it("extracts project.pbxproj content at the code-sized cap, not the text cap", async () => {
+    const result = await extract();
+    const text: string = result.extractedText;
+    expect(text).toContain(
+      "--- CONTENT: SmartTravelJournal/SmartTravelJournal.xcodeproj/project.pbxproj ---",
+    );
+    // Sits ~8.5KB into the manifest: only the code cap reaches it, and it is
+    // the fact a "valid Xcode project" rubric needs to see.
+    expect(text).toContain("com.apple.product-type.application");
+
+    const manifest = result.archiveEntries.find((e: { path: string }) =>
+      e.path.endsWith("project.pbxproj"),
+    );
+    expect(manifest).toBeDefined();
+    expect(manifest.truncated).toBe(false);
+  });
+});
+
+// ─── Jupyter notebook output hygiene ────────────────────────────────────────
+//
+// Notebook outputs are grading evidence, but oversized or duplicated output
+// payloads crowd the learner's actual code out of every downstream budget
+// (the 12K pinned whole-file block, the 30K validation render budget). A
+// 135KB pandas HTML table repr must never reach the prompt when its
+// text/plain sibling already carries the same information.
+
+describe("FileContentExtractionService.extractJupyterNotebook output handling", () => {
+  let service: FileContentExtractionService;
+
+  beforeEach(() => {
+    service = createService();
+  });
+
+  function notebookBuffer(cells: unknown[]): Buffer {
+    return Buffer.from(
+      JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: {}, cells }),
+    );
+  }
+
+  function codeCell(source: string, outputs: unknown[] = []): unknown {
+    return { cell_type: "code", source: [source], metadata: {}, outputs };
+  }
+
+  async function extractNotebook(cells: unknown[]): Promise<string> {
+    const result = await (service as any).extractJupyterNotebook(
+      notebookBuffer(cells),
+      "test.ipynb",
+    );
+    return result.extractedText as string;
+  }
+
+  it("inlines only the highest-preference text payload per output", async () => {
+    const text = await extractNotebook([
+      codeCell("df.head()", [
+        {
+          output_type: "execute_result",
+          execution_count: 1,
+          data: {
+            "text/plain": ["   col_a  col_b\n0      1      2"],
+            "text/html": [
+              '<div><table class="dataframe"><tr><td>1</td></tr></table></div>',
+            ],
+          },
+        },
+      ]),
+    ]);
+
+    expect(text).toContain("col_a  col_b");
+    expect(text).not.toContain("<table");
+  });
+
+  it("keeps image placeholders alongside the text payload", async () => {
+    const text = await extractNotebook([
+      codeCell("plt.plot(x, y)", [
+        {
+          output_type: "display_data",
+          data: {
+            "text/plain": ["<Figure size 640x480 with 1 Axes>"],
+            "image/png": ["iVBORw0KGgoAAAANSUhEUg" + "A".repeat(500)],
+          },
+        },
+      ]),
+    ]);
+
+    expect(text).toContain("<Figure size 640x480 with 1 Axes>");
+    expect(text).toContain("[image/png]: <image data present>");
+    expect(text).not.toContain("iVBORw0KGgo");
+  });
+
+  it("caps an oversized rich-output text payload", async () => {
+    const huge = "x".repeat(50_000);
+    const text = await extractNotebook([
+      codeCell("print(huge)", [
+        { output_type: "execute_result", data: { "text/plain": [huge] } },
+      ]),
+    ]);
+
+    expect(text).toContain("[output truncated");
+    expect(text.length).toBeLessThan(10_000);
+  });
+
+  it("caps an oversized stream output", async () => {
+    const verbose = "Fitting 5 folds for each of 288 candidates\n".repeat(3000);
+    const text = await extractNotebook([
+      codeCell("grid.fit(X, y)", [
+        { output_type: "stream", name: "stdout", text: [verbose] },
+      ]),
+    ]);
+
+    expect(text).toContain("Fitting 5 folds");
+    expect(text).toContain("[output truncated");
+    expect(text.length).toBeLessThan(10_000);
+  });
+
+  it("never inlines non-preferred mime payloads", async () => {
+    const text = await extractNotebook([
+      codeCell("show_gif()", [
+        {
+          output_type: "display_data",
+          data: {
+            "image/webp": "UklGRh4AAABXRUJQVlA4TBEAAAAv" + "B".repeat(400),
+          },
+        },
+      ]),
+    ]);
+
+    expect(text).toContain("[image/webp]: <image data present>");
+    expect(text).not.toContain("UklGRh4");
+  });
+});
